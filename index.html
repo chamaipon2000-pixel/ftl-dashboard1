@@ -167,6 +167,24 @@
     outline:none;
   }
   .filter-bar select:focus{ border-color:var(--amber); }
+  .filter-bar .range-inputs{
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .filter-bar .range-inputs input[type="date"]{
+    background:var(--paper);
+    color:var(--ink);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:7px 10px;
+    font-size:13px;
+    font-family:inherit;
+    cursor:pointer;
+    outline:none;
+  }
+  .filter-bar .range-inputs input[type="date"]:focus{ border-color:var(--amber); }
+  .filter-bar .range-inputs .range-sep{ color:var(--slate-light); font-size:13px; }
   .filter-bar .clear-filters-btn{
     margin-left:auto;
     background:transparent;
@@ -522,9 +540,15 @@
     <div class="seg" id="viewToggle">
       <button data-view="day" class="active">Daily</button>
       <button data-view="month">Monthly</button>
+      <button data-view="range">Range</button>
       <button data-view="all">All</button>
     </div>
     <select id="periodSelect"></select>
+    <span class="range-inputs" id="rangeInputs" style="display:none;">
+      <input type="date" id="rangeFrom">
+      <span class="range-sep">&ndash;</span>
+      <input type="date" id="rangeTo">
+    </span>
     <select id="projectSelect"></select>
     <select id="subcontractorSelect"></select>
     <button id="clearFiltersBtn" class="clear-filters-btn" style="display:none;">Clear Project/Sub-contractor Filters ✕</button>
@@ -677,11 +701,14 @@ function refreshIndexes(){
 }
 refreshIndexes();
 
-let state = { view: 'day', period: ALL_DATES[ALL_DATES.length-1] || null, project: 'all', subcontractor: 'all' };
+let state = { view: 'day', period: ALL_DATES[ALL_DATES.length-1] || null, project: 'all', subcontractor: 'all', rangeFrom: null, rangeTo: null };
 
 // ---------- Controls ----------
 const viewToggle = document.getElementById('viewToggle');
 const periodSelect = document.getElementById('periodSelect');
+const rangeInputs = document.getElementById('rangeInputs');
+const rangeFromInput = document.getElementById('rangeFrom');
+const rangeToInput = document.getElementById('rangeTo');
 const projectSelect = document.getElementById('projectSelect');
 const subcontractorSelect = document.getElementById('subcontractorSelect');
 const clearFiltersBtn = document.getElementById('clearFiltersBtn');
@@ -710,6 +737,25 @@ periodSelect.addEventListener('change', ()=>{
   render();
 });
 
+rangeFromInput.addEventListener('change', ()=>{
+  state.rangeFrom = rangeFromInput.value || null;
+  // Keep the range sane: don't let "from" run past "to"
+  if(state.rangeFrom && state.rangeTo && state.rangeFrom > state.rangeTo){
+    state.rangeTo = state.rangeFrom;
+    rangeToInput.value = state.rangeTo;
+  }
+  render();
+});
+
+rangeToInput.addEventListener('change', ()=>{
+  state.rangeTo = rangeToInput.value || null;
+  if(state.rangeFrom && state.rangeTo && state.rangeTo < state.rangeFrom){
+    state.rangeFrom = state.rangeTo;
+    rangeFromInput.value = state.rangeFrom;
+  }
+  render();
+});
+
 projectSelect.addEventListener('change', ()=>{
   state.project = projectSelect.value;
   render();
@@ -730,6 +776,38 @@ clearFiltersBtn.addEventListener('click', ()=>{
 
 function populatePeriodSelect(){
   periodSelect.innerHTML = '';
+
+  if(state.view === 'range'){
+    periodSelect.style.display = 'none';
+    rangeInputs.style.display = 'flex';
+    state.period = null;
+
+    // No min/max restriction — any date can be picked, not just dates
+    // present in the current dataset (useful for picking a range ahead
+    // of new data landing, or narrower than what's loaded).
+    rangeFromInput.removeAttribute('min');
+    rangeFromInput.removeAttribute('max');
+    rangeToInput.removeAttribute('min');
+    rangeToInput.removeAttribute('max');
+
+    // Default to the first 10 days of the dataset the first time Range is
+    // opened. Once the user has picked their own dates, leave them alone —
+    // don't snap back just because a date falls outside the loaded data.
+    const minDate = ALL_DATES[0] || '';
+    const maxDate = ALL_DATES[ALL_DATES.length-1] || '';
+    if(!state.rangeFrom){
+      state.rangeFrom = minDate;
+    }
+    if(!state.rangeTo){
+      state.rangeTo = ALL_DATES[Math.min(9, ALL_DATES.length-1)] || maxDate;
+    }
+    rangeFromInput.value = state.rangeFrom;
+    rangeToInput.value = state.rangeTo;
+    return;
+  }
+
+  rangeInputs.style.display = 'none';
+
   if(state.view === 'all'){
     periodSelect.style.display = 'none';
     state.period = null;
@@ -934,8 +1012,10 @@ async function syncFromGoogleSheet(isManual){
     dataSourceMode = 'google-sheet';
 
     // Snap to the latest day only if the currently-selected period no longer exists
-    if(state.view !== 'all' && !((state.view === 'day' ? ALL_DATES : ALL_MONTHS).includes(state.period))){
-      state.period = (state.view === 'day' ? ALL_DATES : ALL_MONTHS).slice(-1)[0] || null;
+    if(state.view === 'day' || state.view === 'month'){
+      if(!((state.view === 'day' ? ALL_DATES : ALL_MONTHS).includes(state.period))){
+        state.period = (state.view === 'day' ? ALL_DATES : ALL_MONTHS).slice(-1)[0] || null;
+      }
     }
     populatePeriodSelect();
     populateEntitySelects();
@@ -971,6 +1051,9 @@ function getFiltered(){
   let rows = DATA;
   if(state.view === 'day') rows = rows.filter(d=>d.date === state.period);
   else if(state.view === 'month') rows = rows.filter(d=>d.month === state.period);
+  else if(state.view === 'range' && state.rangeFrom && state.rangeTo){
+    rows = rows.filter(d=> d.date >= state.rangeFrom && d.date <= state.rangeTo);
+  }
   if(state.project !== 'all') rows = rows.filter(d=>d.project === state.project);
   if(state.subcontractor !== 'all') rows = rows.filter(d=>d.subcontractor === state.subcontractor);
   return rows;
@@ -1184,7 +1267,9 @@ function render(){
   const rows = getFiltered();
   document.getElementById('periodText').textContent =
     state.view === 'all' ? (ALL_DATES.length ? `All (${fmtDate(ALL_DATES[0])} – ${fmtDate(ALL_DATES[ALL_DATES.length-1])})` : 'All') :
-    state.view === 'day' ? (state.period ? fmtDate(state.period) : '-') : (state.period ? fmtMonth(state.period) : '-');
+    state.view === 'day' ? (state.period ? fmtDate(state.period) : '-') :
+    state.view === 'range' ? ((state.rangeFrom && state.rangeTo) ? `${fmtDate(state.rangeFrom)} – ${fmtDate(state.rangeTo)}` : '-') :
+    (state.period ? fmtMonth(state.period) : '-');
   document.getElementById('rowCount').textContent = `${rows.length.toLocaleString()} records`;
 
   const activeFilters = [];
