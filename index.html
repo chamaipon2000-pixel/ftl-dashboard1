@@ -331,6 +331,73 @@
     justify-content:center;
   }
 
+  /* ===== Vehicle capacity panel ===== */
+  .capacity-date-block{ margin-bottom:22px; }
+  .capacity-date-block:last-child{ margin-bottom:0; }
+  .capacity-date-heading{
+    display:flex; align-items:center; gap:10px;
+    font-size:12.5px; font-weight:700; color:var(--navy);
+    margin:0 0 10px;
+  }
+  .capacity-date-heading .line{ flex:1; height:1px; background:var(--line); }
+  .capacity-date-heading .mono{ font-family:"JetBrains Mono",monospace; }
+
+  .capacity-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
+    gap:12px;
+  }
+  .capacity-card{
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:13px 14px 12px;
+    background:var(--paper);
+  }
+  .capacity-card.is-over{ border-color:#F3C7C7; background:#FDF4F4; }
+  .capacity-card.is-tight{ border-color:#F5DBB8; background:#FEF9F1; }
+  .capacity-card-head{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:10px;
+  }
+  .capacity-card-sub{
+    font-size:13.5px; font-weight:700; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .capacity-card-badge{
+    font-family:"JetBrains Mono",monospace; font-size:10.5px; font-weight:700;
+    padding:2px 8px; border-radius:20px; white-space:nowrap; flex-shrink:0; margin-left:8px;
+  }
+  .capacity-card-badge.ok{ background:var(--green-soft); color:var(--green); }
+  .capacity-card-badge.tight{ background:var(--amber-soft); color:var(--amber); }
+  .capacity-card-badge.over{ background:#FBE4E4; color:var(--red); }
+  .capacity-card-badge.unknown{ background:var(--line); color:var(--slate); }
+
+  .capacity-type-row{ display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+  .capacity-type-row:last-child{ margin-bottom:0; }
+  .capacity-type-label{
+    width:32px; flex-shrink:0; font-family:"JetBrains Mono",monospace;
+    font-size:10.5px; font-weight:700; color:var(--slate);
+  }
+  .capacity-type-track{
+    flex:1; background:#fff; border:1px solid var(--line); border-radius:5px;
+    height:11px; overflow:hidden;
+  }
+  .capacity-type-fill{ height:100%; border-radius:5px; }
+  .capacity-type-val{
+    font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--slate);
+    min-width:52px; text-align:right; flex-shrink:0;
+  }
+  .capacity-unknown-row{ font-size:11.5px; color:var(--slate-light); font-style:italic; }
+  .capacity-card.is-idle{ opacity:.72; background:var(--paper); border-style:dashed; }
+  .capacity-idle-tag{ font-size:11px; color:var(--slate); font-style:italic; margin:-2px 0 8px; }
+  .page-tabs{ display:flex; gap:8px; margin-bottom:18px; border-bottom:1px solid var(--line); }
+  .page-tabs button{
+    border:none; background:transparent; font-family:inherit; font-size:14px; font-weight:600;
+    color:var(--slate); padding:10px 6px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px;
+  }
+  .page-tabs button.active{ color:var(--navy-deep); border-bottom-color:var(--amber); }
+  .page-tabs button:hover{ color:var(--navy-deep); }
+
   /* full-width trend panel */
   .trend-panel{
     background:var(--card);
@@ -567,6 +634,12 @@
     </div>
   </div>
 
+  <div class="page-tabs" id="pageTabs">
+    <button data-page="overview" class="active">Dashboard</button>
+    <button data-page="capacity">Monitor</button>
+  </div>
+
+  <div id="pageOverview">
   <div class="kpi-grid" id="kpiGrid"></div>
 
   <div class="panels panels-3">
@@ -625,6 +698,17 @@
     <div id="tableWrap"></div>
   </div>
 
+  </div>
+
+  <div id="pageCapacity" style="display:none;">
+  <div class="trend-panel">
+    <div class="panel-title">Vehicle Usage vs. Sub-contractor Capacity</div>
+    <div class="panel-desc" id="capacityDesc">Vehicles actually used (unique car registrations) per sub-contractor per day, compared against how many vehicles per day that sub-contractor can supply &mdash; based on <span class="mono">Sub_1.xlsx</span> (&ldquo;จำนวนรถต่อวันที่สามารถส่งได้&rdquo;)</div>
+    <div id="capacityWrap"></div>
+  </div>
+
+  </div>
+
   <footer>FTL Operations Dashboard &middot; Generated from report_FTL.xlsx</footer>
 </main>
 
@@ -642,6 +726,27 @@ function toNum(v){
 }
 
 const FULL_TRUCK_CAPACITY = 125; // boxes for a fully-loaded truck
+
+// Daily vehicle capacity per sub-contractor, from Sub_1.xlsx
+// ("จำนวนรถต่อวันที่สามารถส่งได้"), summed across all vehicle types (4W/6W/10W)
+// that each sub-contractor lists. Source: Sub_1.xlsx, sheet "รายชื่อ Sub".
+const SUB_CAPACITY = {
+  '249':    { total: 10, byType: { '4W': 6,  '6W': 2, '10W': 2 } },
+  'ND':     { total: 12, byType: { '4W': 12 } },
+  'PCCS':   { total: 10, byType: { '4W': 10 } },
+  'ZP':     { total: 15, byType: { '4W': 15 } },
+  'RL':     { total: 5,  byType: { '4W': 5  } },
+  'JPP':    { total: 5,  byType: { '4W': 3, '10W': 2 } },
+  'JN':     { total: 7,  byType: { '4W': 7  } },
+  'LA':     { total: 15, byType: { '4W': 15 } },
+  'JRK':    { total: 2,  byType: { '4W': 2  } },
+  'CPT':    { total: 3,  byType: { '4W': 3  } },
+  'D-Star': { total: 3,  byType: { '10W': 3 } },
+  'NES':    { total: 15, byType: { '4W': 11, '6W': 2, '10W': 2 } },
+  'MR':     { total: 15, byType: { '4W': 11, '6W': 2, '10W': 2 } },
+  'FFD':    { total: 5,  byType: { '4W': 5  } },
+  'FUZE':   { total: 13, byType: { '4W': 13 } }
+};
 
 function buildDataset(rawRecords){
   return rawRecords.map(r => {
@@ -1184,7 +1289,143 @@ function renderTripTrend(){
   }).join('');
 }
 
-// ---------- Render vehicle-count bars (unique plate per category) ----------
+// ---------- Render vehicle usage vs. sub-contractor capacity ----------
+// For every day present in the filtered rows, show EVERY sub-contractor on
+// file (all 15 in SUB_CAPACITY) — not just the ones that had a trip that
+// day — so idle vehicles are visible too. For each sub-contractor, count
+// the DISTINCT car registrations (plates) actually used that day, broken
+// down BY VEHICLE TYPE (4W / 6W / 10W), and compare each type against that
+// sub-contractor's daily capacity for that type from SUB_CAPACITY (sourced
+// from Sub_1.xlsx). Shows how many vehicles of each type are still available.
+const CAP_TYPE_ORDER = ['4W', '6W', '10W'];
+const ALL_SUB_NAMES = Object.keys(SUB_CAPACITY).sort();
+
+function renderCapacityPanel(rows){
+  const el = document.getElementById('capacityWrap');
+  const descEl = document.getElementById('capacityDesc');
+  if(!rows.length){
+    el.innerHTML = `<div class="empty-state"><b>No data for the selected period</b>Try selecting a different day or month</div>`;
+    return;
+  }
+
+  // date -> sub -> type -> Set(plates)
+  const byDate = {};
+  rows.forEach(r=>{
+    if(!r.date) return;
+    const sub = r.subcontractor || '—';
+    const type = r.type || 'Unspecified';
+    if(!byDate[r.date]) byDate[r.date] = {};
+    if(!byDate[r.date][sub]) byDate[r.date][sub] = {};
+    if(!byDate[r.date][sub][type]) byDate[r.date][sub][type] = new Set();
+    byDate[r.date][sub][type].add(r.plate || `__no-plate-${r.no}`);
+  });
+
+  const dates = Object.keys(byDate).sort().reverse(); // most recent first
+
+  descEl.innerHTML = (dates.length > 1
+    ? `Vehicles actually used (unique plates), broken down by type (4W/6W/10W), vs. each sub-contractor's daily capacity per type &mdash; based on <span class="mono">Sub_1.xlsx</span> &middot; ${dates.length} day${dates.length>1?'s':''} in the selected period`
+    : `Vehicles actually used (unique plates) on this day, broken down by type (4W/6W/10W), vs. each sub-contractor's daily capacity per type &mdash; based on <span class="mono">Sub_1.xlsx</span>`)
+    + ` &middot; all ${ALL_SUB_NAMES.length} sub-contractors on file are shown below, including any not used that day.`;
+
+  function sortTypes(types){
+    return types.slice().sort((a,b)=>{
+      const ia = CAP_TYPE_ORDER.indexOf(a), ib = CAP_TYPE_ORDER.indexOf(b);
+      if(ia === -1 && ib === -1) return a.localeCompare(b);
+      if(ia === -1) return 1;
+      if(ib === -1) return -1;
+      return ia - ib;
+    });
+  }
+
+  let html = '';
+  dates.forEach(date=>{
+    const subMap = byDate[date] || {};
+
+    // Union of every known sub-contractor (from Sub_1.xlsx) with any
+    // sub-contractor that shows up in the data but isn't on file, so
+    // nothing gets silently dropped either way.
+    const unionSubs = new Set([...ALL_SUB_NAMES, ...Object.keys(subMap)]);
+
+    // Rank subs by total vehicles used that day (across all types),
+    // busiest first; idle sub-contractors (0 used) sort to the bottom,
+    // alphabetically among themselves.
+    const subTotals = [...unionSubs].map(sub=>{
+      const typeMap = subMap[sub] || {};
+      const total = Object.values(typeMap).reduce((s,set)=> s + set.size, 0);
+      return [sub, total];
+    }).sort((a,b)=> (b[1]-a[1]) || a[0].localeCompare(b[0]));
+
+    html += `<div class="capacity-date-block">`;
+    html += `<div class="capacity-date-heading"><span class="mono">${fmtDate(date)}</span><span class="line"></span></div>`;
+    html += `<div class="capacity-grid">`;
+
+    subTotals.forEach(([sub, totalUsedForSub])=>{
+      const typeMap = subMap[sub] || {};
+      const capInfo = SUB_CAPACITY[sub];
+      const isIdle = totalUsedForSub === 0;
+      // Union of types actually used and types this sub is known to have capacity for
+      const usedTypes = Object.keys(typeMap);
+      const capTypes = capInfo ? Object.keys(capInfo.byType) : [];
+      const allTypes = sortTypes([...new Set([...capTypes, ...usedTypes])]);
+
+      let worstStatus = 'ok'; // ok | tight | over | unknown
+      const rowsHtml = allTypes.map(type=>{
+        const used = typeMap[type] ? typeMap[type].size : 0;
+        const capacity = capInfo && capInfo.byType[type] !== undefined ? capInfo.byType[type] : null;
+
+        if(capacity === null){
+          if(worstStatus === 'ok') worstStatus = 'unknown';
+          return `
+            <div class="capacity-type-row">
+              <div class="capacity-type-label">${type}</div>
+              <div class="capacity-unknown-row">used ${used} &middot; no capacity data</div>
+            </div>`;
+        }
+
+        const remaining = capacity - used;
+        const pct = capacity > 0 ? (used / capacity * 100) : 0;
+        const pctClamped = Math.min(pct, 100);
+        let barColor = 'var(--green)';
+        if(remaining < 0){ barColor = 'var(--red)'; worstStatus = 'over'; }
+        else if(pct >= 80){ barColor = 'var(--amber)'; if(worstStatus !== 'over') worstStatus = 'tight'; }
+
+        return `
+          <div class="capacity-type-row">
+            <div class="capacity-type-label">${type}</div>
+            <div class="capacity-type-track"><div class="capacity-type-fill" style="width:${pctClamped.toFixed(0)}%;background:${barColor}"></div></div>
+            <div class="capacity-type-val">${used}/${capacity}</div>
+          </div>`;
+      }).join('');
+
+      const totalUsed = Object.values(typeMap).reduce((s,set)=> s+set.size, 0);
+      const totalCap = capInfo ? capInfo.total : null;
+      const totalRemaining = totalCap !== null ? totalCap - totalUsed : null;
+
+      const badgeClass = worstStatus;
+      const badgeText = totalCap === null
+        ? 'No data'
+        : (totalRemaining < 0 ? `Over by ${Math.abs(totalRemaining)}` : `${totalRemaining} free`);
+
+      const cardClass = (worstStatus === 'over' ? ' is-over' : (worstStatus === 'tight' ? ' is-tight' : '')) + (isIdle ? ' is-idle' : '');
+      const idleTag = isIdle ? `<div class="capacity-idle-tag">Not used this day &mdash; full capacity available</div>` : '';
+
+      html += `
+        <div class="capacity-card${cardClass}">
+          <div class="capacity-card-head">
+            <div class="capacity-card-sub" title="${sub}">${sub}</div>
+            <div class="capacity-card-badge ${badgeClass}">${badgeText}</div>
+          </div>
+          ${idleTag}
+          ${rowsHtml}
+        </div>`;
+    });
+
+    html += `</div></div>`; // .capacity-grid, .capacity-date-block
+  });
+
+  el.innerHTML = html;
+}
+
 function renderVehicleBars(rows, keyFn, elId, colorMap, defaultColor, emptyLabel){
   const map = {}; // key -> Set of plates
   rows.forEach(r=>{
@@ -1291,8 +1532,23 @@ function render(){
   renderUtilBars(rows);
   renderTypeBars(rows);
   renderTemperatureBars(rows);
+  renderCapacityPanel(rows);
   renderTable(rows);
 }
+
+// ---------- Page tabs ----------
+const pageTabs = document.getElementById('pageTabs');
+const pageOverview = document.getElementById('pageOverview');
+const pageCapacity = document.getElementById('pageCapacity');
+pageTabs.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button');
+  if(!btn) return;
+  [...pageTabs.children].forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const page = btn.dataset.page;
+  pageOverview.style.display = page === 'overview' ? '' : 'none';
+  pageCapacity.style.display = page === 'capacity' ? '' : 'none';
+});
 
 // ---------- Init ----------
 populatePeriodSelect();
