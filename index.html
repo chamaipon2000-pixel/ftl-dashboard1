@@ -693,6 +693,12 @@
     <div id="tripTrendChart" class="trend-chart"></div>
   </div>
 
+  <div class="trend-panel">
+    <div class="panel-title">Weekly Trip Comparison</div>
+    <div class="panel-desc">Total trips per week (Mon&ndash;Sun) across the full dataset &mdash; not limited by the filters above</div>
+    <div id="tripTrendWeeklyChart" class="trend-chart"></div>
+  </div>
+
   <div class="table-panel">
     <div class="panel-title" style="margin-bottom:14px;">Route Detail</div>
     <div id="tableWrap"></div>
@@ -1289,6 +1295,60 @@ function renderTripTrend(){
   }).join('');
 }
 
+// Returns the Monday (ISO week start) for a given "YYYY-MM-DD" date string,
+// as both a sortable key ("YYYY-MM-DD" of that Monday) and a Date object.
+function weekStart(dateStr){
+  const [y,mo,day] = dateStr.split('-').map(Number);
+  const d = new Date(Date.UTC(y, mo-1, day));
+  const dow = d.getUTCDay(); // 0=Sun..6=Sat
+  const diffToMonday = (dow === 0) ? 6 : dow - 1;
+  d.setUTCDate(d.getUTCDate() - diffToMonday);
+  return d;
+}
+function fmtWeekLabel(mondayDate){
+  const monEnd = new Date(mondayDate);
+  monEnd.setUTCDate(monEnd.getUTCDate() + 6);
+  const mo1 = monthNamesEN[String(mondayDate.getUTCMonth()+1).padStart(2,'0')] || '';
+  const mo2 = monthNamesEN[String(monEnd.getUTCMonth()+1).padStart(2,'0')] || '';
+  const d1 = mondayDate.getUTCDate(), d2 = monEnd.getUTCDate();
+  return mo1 === mo2 ? `${d1}-${d2} ${mo1}` : `${d1} ${mo1} - ${d2} ${mo2}`;
+}
+function weekKey(mondayDate){
+  return mondayDate.toISOString().slice(0,10);
+}
+
+function renderTripTrendWeekly(){
+  const rows = DATA;
+
+  const map = {}; // weekKey -> total trips
+  const mondayOf = {}; // weekKey -> Date
+  rows.forEach(r=>{
+    if(!r.date) return;
+    const mon = weekStart(r.date);
+    const key = weekKey(mon);
+    mondayOf[key] = mon;
+    map[key] = (map[key] || 0) + (r.trip || 0);
+  });
+  const weeks = Object.keys(map).sort();
+  const el = document.getElementById('tripTrendWeeklyChart');
+  if(!weeks.length){
+    el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data</div>';
+    return;
+  }
+  const max = Math.max(...weeks.map(w=>map[w]), 1);
+  el.innerHTML = weeks.map(w=>{
+    const val = map[w];
+    const pct = Math.max((val/max*100), 3);
+    const label = fmtWeekLabel(mondayOf[w]);
+    return `
+    <div class="trend-bar-wrap" title="Week of ${label}: ${val.toLocaleString()} trips">
+      <div class="trend-bar-value">${val.toLocaleString()}</div>
+      <div class="trend-bar" style="height:${pct.toFixed(0)}%"></div>
+      <div class="trend-bar-label">${label}</div>
+    </div>`;
+  }).join('');
+}
+
 // ---------- Render vehicle usage vs. sub-contractor capacity ----------
 // For every day present in the filtered rows, show EVERY sub-contractor on
 // file (all 15 in SUB_CAPACITY) — not just the ones that had a trip that
@@ -1527,6 +1587,7 @@ function render(){
 
   renderKpis(computeKpis(rows));
   renderTripTrend();
+  renderTripTrendWeekly();
   renderProjectBars(rows);
   renderSubcontractorBars(rows);
   renderUtilBars(rows);
