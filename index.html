@@ -1185,7 +1185,7 @@ function renderKpis(k){
     { label:'Sub-contractor', value: k.subcontractorCount.toLocaleString(), unit:'active', accent:'#2E9E6D', foot:'Active subcontractors' },
     { label:'Case', value: k.caseCount.toLocaleString(), unit:'cases', accent:'#D64545', foot:'Number of cases (issues/complaints)' },
     { label:'% Utilization', value:(k.avgUtil*100).toFixed(1), unit:'%', accent:'#E8863A', foot:'Average = boxes ÷ 125 per order' },
-    { label:'% Ontime', value:(k.ontimePct*100).toFixed(1), unit:'%', accent:'#2E9E6D', foot:`Ontime trips (${k.ontimeTripCount.toLocaleString()}) ÷ total trips (${k.tripCount.toLocaleString()})` }
+    { label:'% Ontime', value:'Blank', unit:'', accent:'#2E9E6D', foot:'Data not yet complete' }
   ];
   document.getElementById('kpiGrid').innerHTML = cards.map(c => `
     <div class="kpi-card" style="--kpi-accent:${c.accent}">
