@@ -332,6 +332,26 @@
   }
 
   /* ===== Vehicle capacity panel ===== */
+  .capacity-date-label{
+    font-size:13px; color:var(--slate); font-weight:600;
+  }
+  .capacity-toolbar{
+    display:flex; align-items:center; justify-content:space-between;
+    flex-wrap:wrap; gap:10px;
+    margin-bottom:14px;
+  }
+  .capacity-toolbar-count{ font-size:13px; color:var(--slate); font-weight:600; }
+  .capacity-toolbar-sort{
+    display:flex; align-items:center; gap:8px;
+    font-size:13px; color:var(--slate); font-weight:600;
+  }
+  .capacity-toolbar-sort select{
+    background:var(--paper); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px; font-size:13px; font-family:inherit;
+    cursor:pointer; outline:none;
+  }
+  .capacity-toolbar-sort select:focus{ border-color:var(--amber); }
+
   .capacity-date-block{ margin-bottom:22px; }
   .capacity-date-block:last-child{ margin-bottom:0; }
   .capacity-date-heading{
@@ -371,6 +391,7 @@
   .capacity-card-badge.tight{ background:var(--amber-soft); color:var(--amber); }
   .capacity-card-badge.over{ background:#FBE4E4; color:var(--red); }
   .capacity-card-badge.unknown{ background:var(--line); color:var(--slate); }
+  .capacity-card-badge.idle{ background:var(--line); color:var(--slate); }
 
   .capacity-type-row{ display:flex; align-items:center; gap:8px; margin-bottom:7px; }
   .capacity-type-row:last-child{ margin-bottom:0; }
@@ -390,6 +411,13 @@
   .capacity-unknown-row{ font-size:11.5px; color:var(--slate-light); font-style:italic; }
   .capacity-card.is-idle{ opacity:.72; background:var(--paper); border-style:dashed; }
   .capacity-idle-tag{ font-size:11px; color:var(--slate); font-style:italic; margin:-2px 0 8px; }
+  .capacity-card-total{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-top:10px; padding-top:10px; border-top:1px solid var(--line);
+    font-size:12px; font-weight:700; color:var(--ink);
+  }
+  .capacity-card-total .capacity-card-total-label{ color:var(--slate); font-weight:600; }
+  .capacity-card-total .capacity-card-total-val{ font-family:"JetBrains Mono",monospace; }
   .page-tabs{ display:flex; gap:8px; margin-bottom:18px; border-bottom:1px solid var(--line); }
   .page-tabs button{
     border:none; background:transparent; font-family:inherit; font-size:14px; font-weight:600;
@@ -406,6 +434,57 @@
     padding:20px;
     margin-bottom:16px;
   }
+  .trend-panel-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:12px;
+    margin-bottom:4px;
+  }
+  .trend-controls{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .trend-seg{
+    display:inline-flex;
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:2px;
+    gap:2px;
+  }
+  .trend-seg button{
+    border:none;
+    background:transparent;
+    color:var(--slate);
+    font-size:13px;
+    font-weight:600;
+    padding:7px 14px;
+    border-radius:6px;
+    cursor:pointer;
+    font-family:inherit;
+    transition:.15s;
+  }
+  .trend-seg button.active{
+    background:var(--navy-deep);
+    color:#fff;
+  }
+  .trend-month-select{
+    background:var(--paper);
+    color:var(--ink);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:8px 12px;
+    font-size:13px;
+    font-family:inherit;
+    cursor:pointer;
+    outline:none;
+  }
+  .trend-month-select:focus{ border-color:var(--amber); }
+  .trend-month-select[hidden]{ display:none; }
   .trend-chart{
     display:flex;
     align-items:flex-end;
@@ -688,15 +767,21 @@
   </div>
 
   <div class="trend-panel">
-    <div class="panel-title">Daily Trip Comparison</div>
-    <div class="panel-desc">Total trips per day across the full dataset &mdash; not limited by the filters above</div>
+    <div class="trend-panel-header">
+      <div>
+        <div class="panel-title" id="tripTrendTitle">Trip Volume</div>
+        <div class="panel-desc" id="tripTrendDesc">Total trips</div>
+      </div>
+      <div class="trend-controls">
+        <div class="seg trend-seg" id="tripTrendModeToggle">
+          <button data-mode="day" class="active">Daily</button>
+          <button data-mode="week">Week</button>
+          <button data-mode="month">Month</button>
+        </div>
+        <select id="tripTrendMonthSelect" class="trend-month-select"></select>
+      </div>
+    </div>
     <div id="tripTrendChart" class="trend-chart"></div>
-  </div>
-
-  <div class="trend-panel">
-    <div class="panel-title">Weekly Trip Comparison</div>
-    <div class="panel-desc">Total trips per week (Mon&ndash;Sun) across the full dataset &mdash; not limited by the filters above</div>
-    <div id="tripTrendWeeklyChart" class="trend-chart"></div>
   </div>
 
   <div class="table-panel">
@@ -708,8 +793,32 @@
 
   <div id="pageCapacity" style="display:none;">
   <div class="trend-panel">
-    <div class="panel-title">Vehicle Usage vs. Sub-contractor Capacity</div>
-    <div class="panel-desc" id="capacityDesc">Vehicles actually used (unique car registrations) per sub-contractor per day, compared against how many vehicles per day that sub-contractor can supply &mdash; based on <span class="mono">Sub_1.xlsx</span> (&ldquo;จำนวนรถต่อวันที่สามารถส่งได้&rdquo;)</div>
+    <div class="trend-panel-header">
+      <div>
+        <div class="panel-title">Sub Capacity vs Usage</div>
+        <div class="panel-desc" id="capacityDesc">Vehicles actually used (unique car registrations) per sub-contractor, broken down by type (4W/6W/10W), vs. each sub-contractor's daily capacity &mdash; based on <span class="mono">Sub_1.xlsx</span></div>
+      </div>
+      <div class="trend-controls">
+        <span class="capacity-date-label">Date</span>
+        <input type="date" id="capacityDateInput" class="trend-month-select">
+      </div>
+    </div>
+
+    <div class="kpi-grid" id="capacityKpiGrid" style="margin-top:18px;margin-bottom:6px;"></div>
+
+    <div class="capacity-toolbar">
+      <div class="capacity-toolbar-count" id="capacityCountText">Showing 0 Sub</div>
+      <div class="capacity-toolbar-sort">
+        <span>Sort by:</span>
+        <select id="capacitySortSelect">
+          <option value="utilDesc">Utilization (High → Low)</option>
+          <option value="utilAsc">Utilization (Low → High)</option>
+          <option value="overFirst">Over-capacity first</option>
+          <option value="nameAsc">Sub name (A → Z)</option>
+        </select>
+      </div>
+    </div>
+
     <div id="capacityWrap"></div>
   </div>
 
@@ -1266,37 +1375,10 @@ function renderUtilBars(rows){
   `).join('');
 }
 
-// ---------- Render Trip trend by day ----------
-function renderTripTrend(){
-  const rows = DATA;
+// ---------- Trip Volume trend panel (Daily / Week / Month toggle) ----------
+let tripTrendState = { mode: 'day', month: null };
 
-  const map = {};
-  rows.forEach(r=>{
-    if(!r.date) return;
-    map[r.date] = (map[r.date] || 0) + (r.trip || 0);
-  });
-  const dates = Object.keys(map).sort();
-  const el = document.getElementById('tripTrendChart');
-  if(!dates.length){
-    el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data</div>';
-    return;
-  }
-  const max = Math.max(...dates.map(d=>map[d]), 1);
-  el.innerHTML = dates.map(d=>{
-    const val = map[d];
-    const pct = Math.max((val/max*100), 3);
-    const isSelected = state.view === 'day' && state.period === d;
-    return `
-    <div class="trend-bar-wrap${isSelected ? ' selected' : ''}" title="${fmtDate(d)}: ${val.toLocaleString()} trips">
-      <div class="trend-bar-value">${val.toLocaleString()}</div>
-      <div class="trend-bar" style="height:${pct.toFixed(0)}%"></div>
-      <div class="trend-bar-label">${fmtDateShort(d)}</div>
-    </div>`;
-  }).join('');
-}
-
-// Returns the Monday (ISO week start) for a given "YYYY-MM-DD" date string,
-// as both a sortable key ("YYYY-MM-DD" of that Monday) and a Date object.
+// Returns the Monday (calendar week start) for a given "YYYY-MM-DD" date string.
 function weekStart(dateStr){
   const [y,mo,day] = dateStr.split('-').map(Number);
   const d = new Date(Date.UTC(y, mo-1, day));
@@ -1304,6 +1386,9 @@ function weekStart(dateStr){
   const diffToMonday = (dow === 0) ? 6 : dow - 1;
   d.setUTCDate(d.getUTCDate() - diffToMonday);
   return d;
+}
+function weekKey(mondayDate){
+  return mondayDate.toISOString().slice(0,10);
 }
 function fmtWeekLabel(mondayDate){
   const monEnd = new Date(mondayDate);
@@ -1313,178 +1398,332 @@ function fmtWeekLabel(mondayDate){
   const d1 = mondayDate.getUTCDate(), d2 = monEnd.getUTCDate();
   return mo1 === mo2 ? `${d1}-${d2} ${mo1}` : `${d1} ${mo1} - ${d2} ${mo2}`;
 }
-function weekKey(mondayDate){
-  return mondayDate.toISOString().slice(0,10);
+
+function tripTrendMonths(){
+  return [...new Set(DATA.map(d=>d.month).filter(Boolean))].sort();
 }
 
-function renderTripTrendWeekly(){
-  const rows = DATA;
+function populateTripTrendMonthSelect(){
+  const sel = document.getElementById('tripTrendMonthSelect');
+  const months = tripTrendMonths();
+  if(!months.length){ sel.innerHTML = ''; return; }
+  if(!tripTrendState.month || !months.includes(tripTrendState.month)){
+    tripTrendState.month = months[months.length - 1];
+  }
+  sel.innerHTML = months.map(m=>`<option value="${m}">${fmtMonth(m)}</option>`).join('');
+  sel.value = tripTrendState.month;
+}
 
-  const map = {}; // weekKey -> total trips
-  const mondayOf = {}; // weekKey -> Date
-  rows.forEach(r=>{
-    if(!r.date) return;
-    const mon = weekStart(r.date);
-    const key = weekKey(mon);
-    mondayOf[key] = mon;
-    map[key] = (map[key] || 0) + (r.trip || 0);
-  });
-  const weeks = Object.keys(map).sort();
-  const el = document.getElementById('tripTrendWeeklyChart');
-  if(!weeks.length){
+function renderTrendBars(elId, entries){
+  const el = document.getElementById(elId);
+  if(!entries.length){
     el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data</div>';
     return;
   }
-  const max = Math.max(...weeks.map(w=>map[w]), 1);
-  el.innerHTML = weeks.map(w=>{
-    const val = map[w];
-    const pct = Math.max((val/max*100), 3);
-    const label = fmtWeekLabel(mondayOf[w]);
+  const max = Math.max(...entries.map(e=>e.value), 1);
+  el.innerHTML = entries.map(e=>{
+    const pct = Math.max((e.value/max*100), 3);
     return `
-    <div class="trend-bar-wrap" title="Week of ${label}: ${val.toLocaleString()} trips">
-      <div class="trend-bar-value">${val.toLocaleString()}</div>
+    <div class="trend-bar-wrap${e.selected ? ' selected' : ''}" title="${e.tooltip}">
+      <div class="trend-bar-value">${e.value.toLocaleString()}</div>
       <div class="trend-bar" style="height:${pct.toFixed(0)}%"></div>
-      <div class="trend-bar-label">${label}</div>
+      <div class="trend-bar-label">${e.label}</div>
     </div>`;
   }).join('');
 }
 
-// ---------- Render vehicle usage vs. sub-contractor capacity ----------
-// For every day present in the filtered rows, show EVERY sub-contractor on
-// file (all 15 in SUB_CAPACITY) — not just the ones that had a trip that
-// day — so idle vehicles are visible too. For each sub-contractor, count
-// the DISTINCT car registrations (plates) actually used that day, broken
-// down BY VEHICLE TYPE (4W / 6W / 10W), and compare each type against that
+function renderTripTrendPanel(){
+  populateTripTrendMonthSelect();
+
+  const modeToggle = document.getElementById('tripTrendModeToggle');
+  modeToggle.querySelectorAll('button').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.mode === tripTrendState.mode);
+  });
+  const monthSelect = document.getElementById('tripTrendMonthSelect');
+  monthSelect.hidden = (tripTrendState.mode === 'month');
+
+  const titleEl = document.getElementById('tripTrendTitle');
+  const descEl = document.getElementById('tripTrendDesc');
+  const monthLabel = tripTrendState.month ? fmtMonth(tripTrendState.month) : '';
+
+  if(tripTrendState.mode === 'day'){
+    titleEl.textContent = 'Trip Volume — Daily';
+    descEl.textContent = `Total trips per day for ${monthLabel}`;
+    const rows = DATA.filter(r=>r.month === tripTrendState.month);
+    const map = {};
+    rows.forEach(r=>{ if(r.date) map[r.date] = (map[r.date]||0) + (r.trip||0); });
+    const dates = Object.keys(map).sort();
+    const entries = dates.map(d=>({
+      value: map[d],
+      label: fmtDateShort(d),
+      tooltip: `${fmtDate(d)}: ${map[d].toLocaleString()} trips`,
+      selected: state.view === 'day' && state.period === d
+    }));
+    renderTrendBars('tripTrendChart', entries);
+
+  } else if(tripTrendState.mode === 'week'){
+    titleEl.textContent = 'Trip Volume — Weekly';
+    descEl.textContent = `Total trips per week (Mon\u2013Sun) for ${monthLabel}`;
+    const rows = DATA.filter(r=>r.month === tripTrendState.month);
+    const map = {}; // weekKey (Monday's date) -> total trips
+    const mondayOf = {}; // weekKey -> Date object
+    rows.forEach(r=>{
+      if(!r.date) return;
+      const mon = weekStart(r.date);
+      const key = weekKey(mon);
+      mondayOf[key] = mon;
+      map[key] = (map[key] || 0) + (r.trip || 0);
+    });
+    const weekKeys = Object.keys(map).sort();
+    const entries = weekKeys.map((k, i)=>{
+      const label = fmtWeekLabel(mondayOf[k]);
+      return {
+        value: map[k],
+        label: `W${i + 1}`,
+        tooltip: `Week ${i + 1} (${label}): ${map[k].toLocaleString()} trips`,
+        selected: false
+      };
+    });
+    renderTrendBars('tripTrendChart', entries);
+
+  } else {
+    titleEl.textContent = 'Trip Volume — Monthly';
+    descEl.textContent = 'Total trips per month across the full dataset';
+    const rows = DATA;
+    const map = {};
+    rows.forEach(r=>{ if(r.month) map[r.month] = (map[r.month]||0) + (r.trip||0); });
+    const months = Object.keys(map).sort();
+    const entries = months.map(m=>({
+      value: map[m],
+      label: fmtMonth(m),
+      tooltip: `${fmtMonth(m)}: ${map[m].toLocaleString()} trips`,
+      selected: state.view === 'month' && state.period === m
+    }));
+    renderTrendBars('tripTrendChart', entries);
+  }
+}
+
+document.getElementById('tripTrendModeToggle').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-mode]');
+  if(!btn) return;
+  tripTrendState.mode = btn.dataset.mode;
+  renderTripTrendPanel();
+});
+document.getElementById('tripTrendMonthSelect').addEventListener('change', (e)=>{
+  tripTrendState.month = e.target.value;
+  renderTripTrendPanel();
+});
+
+
+
+// ---------- Sub Capacity vs Usage (Monitor page) ----------
+// Shows EVERY sub-contractor on file (all in SUB_CAPACITY) for a single
+// selected day — not just the ones that had a trip that day — so idle
+// vehicles are visible too. For each sub-contractor, count the DISTINCT
+// car registrations (plates) actually used that day, broken down BY
+// VEHICLE TYPE (4W / 6W / 10W), and compare each type against that
 // sub-contractor's daily capacity for that type from SUB_CAPACITY (sourced
 // from Sub_1.xlsx). Shows how many vehicles of each type are still available.
 const CAP_TYPE_ORDER = ['4W', '6W', '10W'];
 const ALL_SUB_NAMES = Object.keys(SUB_CAPACITY).sort();
 
-function renderCapacityPanel(rows){
+let capacityState = { date: null, sort: 'utilDesc' };
+
+function sortCapTypes(types){
+  return types.slice().sort((a,b)=>{
+    const ia = CAP_TYPE_ORDER.indexOf(a), ib = CAP_TYPE_ORDER.indexOf(b);
+    if(ia === -1 && ib === -1) return a.localeCompare(b);
+    if(ia === -1) return 1;
+    if(ib === -1) return -1;
+    return ia - ib;
+  });
+}
+
+// Builds one entry per sub-contractor (known + any extra found in the data)
+// for the given date, with per-type usage vs. capacity and an overall status.
+function computeCapacityEntries(date){
+  const rows = DATA.filter(r=>r.date === date);
+  const subMap = {}; // sub -> type -> Set(plate)
+  rows.forEach(r=>{
+    const sub = r.subcontractor || '—';
+    const type = r.type || 'Unspecified';
+    if(!subMap[sub]) subMap[sub] = {};
+    if(!subMap[sub][type]) subMap[sub][type] = new Set();
+    subMap[sub][type].add(r.plate || `__no-plate-${r.no}`);
+  });
+
+  const unionSubs = new Set([...ALL_SUB_NAMES, ...Object.keys(subMap)]);
+
+  return [...unionSubs].map(sub=>{
+    const typeMap = subMap[sub] || {};
+    const capInfo = SUB_CAPACITY[sub];
+    const usedTypes = Object.keys(typeMap);
+    const capTypes = capInfo ? Object.keys(capInfo.byType) : [];
+    const allTypes = sortCapTypes([...new Set([...capTypes, ...usedTypes])]);
+
+    let worstStatus = 'ok'; // ok | tight | over | unknown
+    const typeRows = allTypes.map(type=>{
+      const used = typeMap[type] ? typeMap[type].size : 0;
+      const capacity = capInfo && capInfo.byType[type] !== undefined ? capInfo.byType[type] : null;
+      if(capacity === null){
+        if(worstStatus === 'ok') worstStatus = 'unknown';
+        return { type, used, capacity: null };
+      }
+      const remaining = capacity - used;
+      const pct = capacity > 0 ? (used / capacity * 100) : 0;
+      if(remaining < 0){ worstStatus = 'over'; }
+      else if(pct >= 80 && worstStatus !== 'over'){ worstStatus = 'tight'; }
+      return { type, used, capacity, remaining, pct };
+    });
+
+    const totalUsed = Object.values(typeMap).reduce((s,set)=> s + set.size, 0);
+    const totalCap = capInfo ? capInfo.total : null;
+    const totalRemaining = totalCap !== null ? totalCap - totalUsed : null;
+    const isIdle = totalUsed === 0;
+    const utilPct = totalCap ? (totalUsed / totalCap * 100) : (totalUsed > 0 ? 100 : -1);
+
+    return { sub, typeRows, totalUsed, totalCap, totalRemaining, worstStatus, isIdle, utilPct };
+  });
+}
+
+function sortCapacityEntries(entries, sortMode){
+  const list = entries.slice();
+  const statusRank = { over: 0, tight: 1, ok: 2, unknown: 3 };
+  switch(sortMode){
+    case 'utilAsc':
+      return list.sort((a,b)=> (a.utilPct - b.utilPct) || a.sub.localeCompare(b.sub));
+    case 'overFirst':
+      return list.sort((a,b)=> (statusRank[a.worstStatus]-statusRank[b.worstStatus]) || (b.utilPct-a.utilPct) || a.sub.localeCompare(b.sub));
+    case 'nameAsc':
+      return list.sort((a,b)=> a.sub.localeCompare(b.sub));
+    case 'utilDesc':
+    default:
+      return list.sort((a,b)=> (b.utilPct - a.utilPct) || a.sub.localeCompare(b.sub));
+  }
+}
+
+function populateCapacityDateInput(){
+  const input = document.getElementById('capacityDateInput');
+  if(!ALL_DATES.length) return;
+  if(!capacityState.date || !ALL_DATES.includes(capacityState.date)){
+    capacityState.date = ALL_DATES[ALL_DATES.length - 1];
+  }
+  input.min = ALL_DATES[0];
+  input.max = ALL_DATES[ALL_DATES.length - 1];
+  input.value = capacityState.date;
+}
+
+function renderCapacityKpis(entries){
+  const totalCapacity = Object.values(SUB_CAPACITY).reduce((s,c)=> s + c.total, 0);
+  const usedToday = entries.reduce((s,e)=> s + e.totalUsed, 0);
+  const subsUsed = entries.filter(e=> e.totalUsed > 0).length;
+  const utilizationPct = totalCapacity > 0 ? (usedToday / totalCapacity * 100) : 0;
+  const alertCount = entries.filter(e=> e.worstStatus === 'over').length;
+
+  const cards = [
+    { label: 'Total Capacity', value: totalCapacity.toLocaleString(), unit: 'vehicles', accent: '#3D2A85', foot: `Across ${entries.length} Sub` },
+    { label: 'Used Today', value: usedToday.toLocaleString(), unit: 'vehicles', accent: '#2E9E6D', foot: `${subsUsed}/${entries.length} Sub in use today` },
+    { label: 'Utilization', value: utilizationPct.toFixed(0), unit: '%', accent: '#E8863A', foot: 'Used ÷ total capacity' },
+    { label: 'Alert', value: alertCount, unit: 'Sub', accent: '#D64545', foot: alertCount ? 'Over capacity — needs review' : 'No sub-contractor over capacity' }
+  ];
+  document.getElementById('capacityKpiGrid').innerHTML = cards.map(c => `
+    <div class="kpi-card" style="--kpi-accent:${c.accent}">
+      <div class="kpi-label">${c.label}</div>
+      <div class="kpi-value">${c.value}<span class="kpi-unit">${c.unit}</span></div>
+      <div class="kpi-foot">${c.foot}</div>
+    </div>
+  `).join('');
+}
+
+function renderCapacityPanel(){
   const el = document.getElementById('capacityWrap');
   const descEl = document.getElementById('capacityDesc');
-  if(!rows.length){
-    el.innerHTML = `<div class="empty-state"><b>No data for the selected period</b>Try selecting a different day or month</div>`;
+  const countEl = document.getElementById('capacityCountText');
+
+  populateCapacityDateInput();
+
+  if(!capacityState.date){
+    el.innerHTML = `<div class="empty-state"><b>No data available</b>There are no dates in the current dataset</div>`;
+    document.getElementById('capacityKpiGrid').innerHTML = '';
+    countEl.textContent = 'Showing 0 Sub';
     return;
   }
 
-  // date -> sub -> type -> Set(plates)
-  const byDate = {};
-  rows.forEach(r=>{
-    if(!r.date) return;
-    const sub = r.subcontractor || '—';
-    const type = r.type || 'Unspecified';
-    if(!byDate[r.date]) byDate[r.date] = {};
-    if(!byDate[r.date][sub]) byDate[r.date][sub] = {};
-    if(!byDate[r.date][sub][type]) byDate[r.date][sub][type] = new Set();
-    byDate[r.date][sub][type].add(r.plate || `__no-plate-${r.no}`);
-  });
+  const entries = computeCapacityEntries(capacityState.date);
 
-  const dates = Object.keys(byDate).sort().reverse(); // most recent first
+  descEl.innerHTML = `Vehicles actually used (unique plates) on <span class="mono">${fmtDate(capacityState.date)}</span>, broken down by type (4W/6W/10W), vs. each sub-contractor's daily capacity &mdash; based on <span class="mono">Sub_1.xlsx</span> &middot; all ${ALL_SUB_NAMES.length} sub-contractors on file are shown below, including any not used that day.`;
 
-  descEl.innerHTML = (dates.length > 1
-    ? `Vehicles actually used (unique plates), broken down by type (4W/6W/10W), vs. each sub-contractor's daily capacity per type &mdash; based on <span class="mono">Sub_1.xlsx</span> &middot; ${dates.length} day${dates.length>1?'s':''} in the selected period`
-    : `Vehicles actually used (unique plates) on this day, broken down by type (4W/6W/10W), vs. each sub-contractor's daily capacity per type &mdash; based on <span class="mono">Sub_1.xlsx</span>`)
-    + ` &middot; all ${ALL_SUB_NAMES.length} sub-contractors on file are shown below, including any not used that day.`;
+  renderCapacityKpis(entries);
+  countEl.textContent = `Showing ${entries.length} Sub`;
 
-  function sortTypes(types){
-    return types.slice().sort((a,b)=>{
-      const ia = CAP_TYPE_ORDER.indexOf(a), ib = CAP_TYPE_ORDER.indexOf(b);
-      if(ia === -1 && ib === -1) return a.localeCompare(b);
-      if(ia === -1) return 1;
-      if(ib === -1) return -1;
-      return ia - ib;
-    });
-  }
+  const sorted = sortCapacityEntries(entries, capacityState.sort);
 
-  let html = '';
-  dates.forEach(date=>{
-    const subMap = byDate[date] || {};
+  el.innerHTML = `<div class="capacity-grid">` + sorted.map(entry=>{
+    const { sub, typeRows, totalUsed, totalCap, totalRemaining, worstStatus, isIdle } = entry;
 
-    // Union of every known sub-contractor (from Sub_1.xlsx) with any
-    // sub-contractor that shows up in the data but isn't on file, so
-    // nothing gets silently dropped either way.
-    const unionSubs = new Set([...ALL_SUB_NAMES, ...Object.keys(subMap)]);
-
-    // Rank subs by total vehicles used that day (across all types),
-    // busiest first; idle sub-contractors (0 used) sort to the bottom,
-    // alphabetically among themselves.
-    const subTotals = [...unionSubs].map(sub=>{
-      const typeMap = subMap[sub] || {};
-      const total = Object.values(typeMap).reduce((s,set)=> s + set.size, 0);
-      return [sub, total];
-    }).sort((a,b)=> (b[1]-a[1]) || a[0].localeCompare(b[0]));
-
-    html += `<div class="capacity-date-block">`;
-    html += `<div class="capacity-date-heading"><span class="mono">${fmtDate(date)}</span><span class="line"></span></div>`;
-    html += `<div class="capacity-grid">`;
-
-    subTotals.forEach(([sub, totalUsedForSub])=>{
-      const typeMap = subMap[sub] || {};
-      const capInfo = SUB_CAPACITY[sub];
-      const isIdle = totalUsedForSub === 0;
-      // Union of types actually used and types this sub is known to have capacity for
-      const usedTypes = Object.keys(typeMap);
-      const capTypes = capInfo ? Object.keys(capInfo.byType) : [];
-      const allTypes = sortTypes([...new Set([...capTypes, ...usedTypes])]);
-
-      let worstStatus = 'ok'; // ok | tight | over | unknown
-      const rowsHtml = allTypes.map(type=>{
-        const used = typeMap[type] ? typeMap[type].size : 0;
-        const capacity = capInfo && capInfo.byType[type] !== undefined ? capInfo.byType[type] : null;
-
-        if(capacity === null){
-          if(worstStatus === 'ok') worstStatus = 'unknown';
-          return `
-            <div class="capacity-type-row">
-              <div class="capacity-type-label">${type}</div>
-              <div class="capacity-unknown-row">used ${used} &middot; no capacity data</div>
-            </div>`;
-        }
-
-        const remaining = capacity - used;
-        const pct = capacity > 0 ? (used / capacity * 100) : 0;
-        const pctClamped = Math.min(pct, 100);
-        let barColor = 'var(--green)';
-        if(remaining < 0){ barColor = 'var(--red)'; worstStatus = 'over'; }
-        else if(pct >= 80){ barColor = 'var(--amber)'; if(worstStatus !== 'over') worstStatus = 'tight'; }
-
+    const rowsHtml = typeRows.map(row=>{
+      if(row.capacity === null){
         return `
           <div class="capacity-type-row">
-            <div class="capacity-type-label">${type}</div>
-            <div class="capacity-type-track"><div class="capacity-type-fill" style="width:${pctClamped.toFixed(0)}%;background:${barColor}"></div></div>
-            <div class="capacity-type-val">${used}/${capacity}</div>
+            <div class="capacity-type-label">${row.type}</div>
+            <div class="capacity-unknown-row">used ${row.used} &middot; no capacity data</div>
           </div>`;
-      }).join('');
-
-      const totalUsed = Object.values(typeMap).reduce((s,set)=> s+set.size, 0);
-      const totalCap = capInfo ? capInfo.total : null;
-      const totalRemaining = totalCap !== null ? totalCap - totalUsed : null;
-
-      const badgeClass = worstStatus;
-      const badgeText = totalCap === null
-        ? 'No data'
-        : (totalRemaining < 0 ? `Over by ${Math.abs(totalRemaining)}` : `${totalRemaining} free`);
-
-      const cardClass = (worstStatus === 'over' ? ' is-over' : (worstStatus === 'tight' ? ' is-tight' : '')) + (isIdle ? ' is-idle' : '');
-      const idleTag = isIdle ? `<div class="capacity-idle-tag">Not used this day &mdash; full capacity available</div>` : '';
-
-      html += `
-        <div class="capacity-card${cardClass}">
-          <div class="capacity-card-head">
-            <div class="capacity-card-sub" title="${sub}">${sub}</div>
-            <div class="capacity-card-badge ${badgeClass}">${badgeText}</div>
-          </div>
-          ${idleTag}
-          ${rowsHtml}
+      }
+      const pctClamped = Math.min(row.pct, 100);
+      let barColor = 'var(--green)';
+      if(row.remaining < 0){ barColor = 'var(--red)'; }
+      else if(row.pct >= 80){ barColor = 'var(--amber)'; }
+      return `
+        <div class="capacity-type-row">
+          <div class="capacity-type-label">${row.type}</div>
+          <div class="capacity-type-track"><div class="capacity-type-fill" style="width:${pctClamped.toFixed(0)}%;background:${barColor}"></div></div>
+          <div class="capacity-type-val">${row.used}/${row.capacity}</div>
         </div>`;
-    });
+    }).join('');
 
-    html += `</div></div>`; // .capacity-grid, .capacity-date-block
-  });
+    let badgeClass, badgeText;
+    if(isIdle){
+      badgeClass = 'idle';
+      badgeText = 'Not used today';
+    } else if(totalCap === null){
+      badgeClass = 'unknown';
+      badgeText = 'No data';
+    } else if(totalRemaining < 0){
+      badgeClass = 'over';
+      badgeText = `Over by ${Math.abs(totalRemaining)}`;
+    } else {
+      badgeClass = (worstStatus === 'tight') ? 'tight' : 'ok';
+      badgeText = `${totalRemaining} free`;
+    }
 
-  el.innerHTML = html;
+    const cardClass = (worstStatus === 'over' ? ' is-over' : (worstStatus === 'tight' ? ' is-tight' : '')) + (isIdle ? ' is-idle' : '');
+    const totalText = totalCap !== null ? `${totalUsed} / ${totalCap} vehicles` : `${totalUsed} used &middot; no data`;
+
+    return `
+      <div class="capacity-card${cardClass}">
+        <div class="capacity-card-head">
+          <div class="capacity-card-sub" title="${sub}">${sub}</div>
+          <div class="capacity-card-badge ${badgeClass}">${badgeText}</div>
+        </div>
+        ${rowsHtml}
+        <div class="capacity-card-total">
+          <div class="capacity-card-total-label">Total</div>
+          <div class="capacity-card-total-val">${totalText}</div>
+        </div>
+      </div>`;
+  }).join('') + `</div>`;
 }
+
+document.getElementById('capacityDateInput').addEventListener('change', (e)=>{
+  if(e.target.value){
+    capacityState.date = e.target.value;
+    renderCapacityPanel();
+  }
+});
+document.getElementById('capacitySortSelect').addEventListener('change', (e)=>{
+  capacityState.sort = e.target.value;
+  renderCapacityPanel();
+});
 
 function renderVehicleBars(rows, keyFn, elId, colorMap, defaultColor, emptyLabel){
   const map = {}; // key -> Set of plates
@@ -1586,14 +1825,13 @@ function render(){
   }
 
   renderKpis(computeKpis(rows));
-  renderTripTrend();
-  renderTripTrendWeekly();
+  renderTripTrendPanel();
   renderProjectBars(rows);
   renderSubcontractorBars(rows);
   renderUtilBars(rows);
   renderTypeBars(rows);
   renderTemperatureBars(rows);
-  renderCapacityPanel(rows);
+  renderCapacityPanel();
   renderTable(rows);
 }
 
