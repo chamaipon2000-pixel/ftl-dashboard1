@@ -906,7 +906,14 @@ function fmtDateShort(d){
 
 // ---------- Google Sheet live-sync config ----------
 const GOOGLE_SHEET_ID = '1kLF2mj_kc3gVoiOTyfuLMo0bcYP5B3ef';
-const GOOGLE_SHEET_TAB = 'report';
+// The dashboard has no way to ask Google "list every tab in this file" without
+// an API key, so instead it probes this fixed list of candidate tab names on
+// every sync and silently skips whichever ones don't exist yet. 'report' is
+// the original/legacy tab; the month abbreviations cover any future monthly
+// tab (Sep, Oct, Nov, ...) the moment it's created — as long as it's named
+// with the standard 3-letter English month abbreviation (matching "Sep"),
+// nothing else needs to change here when a new month starts.
+const GOOGLE_SHEET_TABS = ['report','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const AUTO_REFRESH_MS = 3 * 60 * 1000; // 3 minutes
 
 // ---------- State ----------
@@ -1177,8 +1184,8 @@ function parseGvizDateLiteral(v){
   return v;
 }
 
-async function fetchGoogleSheetRecords(){
-  const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(GOOGLE_SHEET_TAB)}&_=${Date.now()}`;
+async function fetchGoogleSheetRecords(tabName){
+  const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tabName)}&_=${Date.now()}`;
   const res = await fetch(url, { cache: 'no-store' });
   if(!res.ok) throw new Error(`HTTP ${res.status} — check the sheet is shared as "Anyone with the link"`);
   const text = await res.text();
@@ -1209,6 +1216,33 @@ async function fetchGoogleSheetRecords(){
   return records;
 }
 
+// Probes every candidate tab in parallel and merges whichever ones actually
+// exist. A tab that doesn't exist (not created yet, e.g. next month) simply
+// fails its own fetch and is skipped — it never blocks the others. Returns
+// both the merged records and the list of tab names that were found, so the
+// UI can tell the user exactly what got synced.
+async function fetchAllGoogleSheetRecords(){
+  const results = await Promise.allSettled(
+    GOOGLE_SHEET_TABS.map(tab => fetchGoogleSheetRecords(tab))
+  );
+  let merged = [];
+  const foundTabs = [];
+  const failedTabs = [];
+  results.forEach((res, i)=>{
+    const tab = GOOGLE_SHEET_TABS[i];
+    if(res.status === 'fulfilled' && res.value.length){
+      merged = merged.concat(res.value);
+      foundTabs.push(tab);
+    } else if(res.status === 'rejected'){
+      failedTabs.push(tab);
+    }
+  });
+  if(!foundTabs.length){
+    throw new Error('No matching tabs found (checked: ' + GOOGLE_SHEET_TABS.join(', ') + ')');
+  }
+  return { records: merged, foundTabs, failedTabs };
+}
+
 let autoRefreshTimer = null;
 let isSyncing = false;
 
@@ -1224,7 +1258,7 @@ async function syncFromGoogleSheet(isManual){
   refreshBtn.classList.add('spinning');
   if(isManual) setSyncStatus(dataSourceMode === 'google-sheet' ? 'live' : '', 'Syncing…');
   try{
-    const records = await fetchGoogleSheetRecords();
+    const { records, foundTabs } = await fetchAllGoogleSheetRecords();
     if(!records.length) throw new Error('Sheet returned no rows');
 
     DATA = buildDataset(records);
@@ -1242,10 +1276,11 @@ async function syncFromGoogleSheet(isManual){
     render();
 
     const stamp = new Date().toLocaleString('en-US', { dateStyle:'medium', timeStyle:'short' });
-    dataSourceText.innerHTML = `<span class="status-icon">●</span><b>Data source:</b> Google Sheet (live) &middot; synced ${stamp} &middot; ${records.length.toLocaleString()} rows`;
+    const tabsLabel = foundTabs.join(', ');
+    dataSourceText.innerHTML = `<span class="status-icon">●</span><b>Data source:</b> Google Sheet (live) &middot; tabs: ${tabsLabel} &middot; synced ${stamp} &middot; ${records.length.toLocaleString()} rows`;
     dataSourceBar.classList.add('updated');
     setSyncStatus('live', `Live · synced ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
-    if(isManual) showToast(`Synced with Google Sheet (${records.length.toLocaleString()} rows)`);
+    if(isManual) showToast(`Synced with Google Sheet (${tabsLabel} · ${records.length.toLocaleString()} rows)`);
   }catch(err){
     console.error(err);
     setSyncStatus('error', 'Sync failed — using last data');
