@@ -302,7 +302,7 @@
     margin-bottom:16px;
     align-items:stretch;
   }
-  .panels.panels-3{ grid-template-columns:repeat(3,1fr); }
+  .panels.panels-3{ grid-template-columns:repeat(2,1fr); }
   @media (max-width:960px){ .panels, .panels.panels-3{ grid-template-columns:1fr 1fr; } }
   @media (max-width:620px){ .panels, .panels.panels-3{ grid-template-columns:1fr; } }
 
@@ -738,6 +738,15 @@
       <div class="panel-body" id="temperatureBars"></div>
     </div>
     <div class="panel">
+      <div class="panel-title">By Zone</div>
+      <div class="panel-desc">Number of vehicles (unique plates) by BKK / Upcountry</div>
+      <div class="util-legend">
+        <span><i class="dot" style="background:#3B82F6"></i>BKK</span>
+        <span><i class="dot" style="background:#E8863A"></i>Upcountry</span>
+      </div>
+      <div class="panel-body" id="zoneBars"></div>
+    </div>
+    <div class="panel">
       <div class="panel-title">% Utilization Distribution</div>
       <div class="panel-desc">Share of orders by truck space utilization range</div>
       <div class="util-legend">
@@ -880,6 +889,7 @@ function buildDataset(rawRecords){
       plate: r["Car registration"] || '',
       type: r["Type"] || '',
       temperature: r["Temperature"] || '',
+      zone: r["Zone"] || '',
       box: box,
       trip: toNum(r["Trip"]) || 0,
       subcontractor: (r["Sub-contractor"] !== '' && r["Sub-contractor"] !== null && r["Sub-contractor"] !== undefined) ? String(r["Sub-contractor"]) : '',
@@ -1184,6 +1194,33 @@ function parseGvizDateLiteral(v){
   return v;
 }
 
+// Column headers are matched by exact name against these — but a copied
+// tab for a new month can easily end up with a header that's spelled
+// slightly differently (extra space, different case, a shortened word).
+// When that happens the column silently fails to map and every row falls
+// back to blank/"Unspecified" for that field (this is what caused the
+// Temperature chart to show everything as Unspecified for the Sep tab).
+// normalizeHeader tolerates whitespace/case differences and a couple of
+// common real-world variants so a new tab doesn't need identical formatting.
+const CANONICAL_HEADERS = ["No.","Date","Project","Routh","Province","Driver","Car registration","Type","Temperature","Q'ty Box/Order","Trip","Sub-contractor","Case","Ontime","% Utilization","Zone"];
+const HEADER_ALIASES = {
+  'temp': 'Temperature',
+  'car reg': 'Car registration',
+  'plate': 'Car registration',
+  'subcontractor': 'Sub-contractor',
+  'sub contractor': 'Sub-contractor',
+  'qty box/order': "Q'ty Box/Order",
+  'utilization': '% Utilization'
+};
+function normalizeHeader(raw){
+  const trimmed = (raw || '').toString().trim();
+  const lower = trimmed.toLowerCase();
+  const exact = CANONICAL_HEADERS.find(c => c.toLowerCase() === lower);
+  if(exact) return exact;
+  if(HEADER_ALIASES[lower]) return HEADER_ALIASES[lower];
+  return trimmed;
+}
+
 async function fetchGoogleSheetRecords(tabName){
   const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tabName)}&_=${Date.now()}`;
   const res = await fetch(url, { cache: 'no-store' });
@@ -1199,7 +1236,7 @@ async function fetchGoogleSheetRecords(tabName){
     const msg = (payload.errors && payload.errors[0] && payload.errors[0].detailed_message) || 'Google Sheets returned an error';
     throw new Error(msg);
   }
-  const cols = payload.table.cols.map(c => (c.label || c.id || '').toString().trim());
+  const cols = payload.table.cols.map(c => normalizeHeader(c.label || c.id || ''));
   const dateColIdx = cols.indexOf('Date');
   const rows = payload.table.rows || [];
   const records = rows.map(r=>{
@@ -1785,12 +1822,43 @@ function renderVehicleBars(rows, keyFn, elId, colorMap, defaultColor, emptyLabel
 
 const TYPE_COLORS = { '4W':'#7A56D6', '6W':'#5A3FB0', '10W':'#3D2A85' };
 const TEMP_COLORS = { 'Frozen':'#3B82F6', 'Chilled':'#22B8CF', 'Dry':'#E8863A' };
+const ZONE_COLORS = { 'BKK':'#3B82F6', 'Upcountry':'#E8863A' };
 
 function renderTypeBars(rows){
   renderVehicleBars(rows, r=>r.type, 'typeBars', TYPE_COLORS, '#94A3B8', 'Unspecified');
 }
 function renderTemperatureBars(rows){
   renderVehicleBars(rows, r=>r.temperature, 'temperatureBars', TEMP_COLORS, '#94A3B8', 'Unspecified');
+}
+
+// Same as renderVehicleBars but also shows each bar's share of the total
+// (unique-plate count / sum of all category counts) as a percentage.
+function renderVehicleBarsWithPercent(rows, keyFn, elId, colorMap, defaultColor, emptyLabel){
+  const map = {}; // key -> Set of plates
+  rows.forEach(r=>{
+    const key = (keyFn(r) || '').toString().trim() || emptyLabel;
+    if(!map[key]) map[key] = new Set();
+    if(r.plate) map[key].add(r.plate);
+    else map[key].add(`__no-plate-${r.no}`);
+  });
+  const entries = Object.entries(map).map(([k,set])=>[k, set.size]).sort((a,b)=>b[1]-a[1]);
+  const el = document.getElementById(elId);
+  if(!entries.length){ el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data</div>'; return; }
+  const total = entries.reduce((sum,[,c])=>sum+c, 0) || 1;
+  const max = entries[0][1];
+  el.innerHTML = entries.map(([name,count])=>{
+    const color = colorMap[name] || defaultColor;
+    const pct = ((count/total)*100).toFixed(1);
+    return `
+    <div class="bar-row">
+      <div class="bar-name" style="color:${color}">${name}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(count/max*100).toFixed(0)}%;background:${color}"></div></div>
+      <div class="bar-val">${count} <span style="opacity:.6;font-weight:400;">(${pct}%)</span></div>
+    </div>
+  `;}).join('');
+}
+function renderZoneBars(rows){
+  renderVehicleBarsWithPercent(rows, r=>r.zone, 'zoneBars', ZONE_COLORS, '#94A3B8', 'Unspecified');
 }
 
 // ---------- Render table ----------
@@ -1806,7 +1874,7 @@ function renderTable(rows){
       <thead>
         <tr>
           <th>No.</th><th>Date</th><th>Project</th><th>Routh</th><th>Province</th>
-          <th>Driver</th><th>Plate</th><th>Type</th><th>Temp.</th>
+          <th>Driver</th><th>Plate</th><th>Type</th><th>Temp.</th><th>Zone</th>
           <th style="text-align:right">Box</th><th style="text-align:right">Trip</th>
           <th>Sub-contractor</th><th style="text-align:right">Case</th>
           <th>Ontime</th><th style="text-align:right">Utilization</th>
@@ -1824,6 +1892,7 @@ function renderTable(rows){
             <td class="mono">${r.plate}</td>
             <td>${r.type}</td>
             <td>${r.temperature || '—'}</td>
+            <td>${r.zone || '—'}</td>
             <td class="num">${r.box !== null ? r.box.toLocaleString() : '—'}</td>
             <td class="num">${r.trip}</td>
             <td class="mono">${r.subcontractor || '—'}</td>
@@ -1866,6 +1935,7 @@ function render(){
   renderUtilBars(rows);
   renderTypeBars(rows);
   renderTemperatureBars(rows);
+  renderZoneBars(rows);
   renderCapacityPanel();
   renderTable(rows);
 }
