@@ -1179,9 +1179,17 @@ function showToast(msg, isError){
 // ---------- Google Sheet live-sync ----------
 // Uses the public gviz JSON endpoint, which works for any sheet shared as
 // "Anyone with the link — Viewer" without needing an API key or OAuth.
-// Dates come back as Google's own Date(y,m,d) literal (m is 0-indexed),
-// which sidesteps locale-dependent M/D vs D/M ambiguity entirely.
-function parseGvizDateLiteral(v){
+// Dates *should* come back as Google's own Date(y,m,d) literal (m is
+// 0-indexed), which sidesteps locale-dependent M/D vs D/M ambiguity
+// entirely — but only if the Date column is a real Sheets "date" type.
+// If someone typed dates in as plain text (a common copy/paste accident),
+// gviz just hands back the raw string (e.g. "1/8/2026") instead, which used
+// to pass straight through unparsed and quietly break every date-based
+// sort/filter/month-bucket downstream. parseDateAny() now also recognises
+// that plain "D/M/YYYY" text form (the format this sheet's Date column
+// displays as) and normalizes it the same way, so a text-typed Date cell
+// no longer corrupts the dataset.
+function parseDateAny(v){
   if(typeof v === 'string' && v.indexOf('Date(') === 0){
     const m = v.match(/Date\((\d+),(\d+),(\d+)/);
     if(m){
@@ -1191,7 +1199,29 @@ function parseGvizDateLiteral(v){
       return `${y}-${mo}-${d}`;
     }
   }
+  if(typeof v === 'string'){
+    // Plain-text "D/M/YYYY" (or "DD/MM/YYYY") as typed/displayed in the sheet.
+    const m = v.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if(m){
+      const d = m[1].padStart(2,'0');
+      const mo = m[2].padStart(2,'0');
+      const y = m[3];
+      return `${y}-${mo}-${d}`;
+    }
+  }
   return v;
+}
+
+const MONTH_NUM_TO_ABBR = {'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+// Given an already-normalized "YYYY-MM-DD" date string, returns the 3-letter
+// month tab name it belongs to ("Aug", "Sep", ...), or null if it isn't in
+// that shape (used to decide whether a "report" row is superseded by a
+// dedicated month tab — see fetchAllGoogleSheetRecords below).
+function isoMonthAbbr(dateStr){
+  if(typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)){
+    return MONTH_NUM_TO_ABBR[dateStr.slice(5,7)] || null;
+  }
+  return null;
 }
 
 // Column headers are matched by exact name against these — but a copied
@@ -1245,7 +1275,7 @@ async function fetchGoogleSheetRecords(tabName){
       const cell = r.c ? r.c[i] : null;
       let v = cell ? cell.v : '';
       if(v === null || v === undefined) v = '';
-      if(i === dateColIdx) v = parseGvizDateLiteral(v);
+      if(i === dateColIdx) v = parseDateAny(v);
       obj[colName] = v;
     });
     return obj;
@@ -1258,17 +1288,27 @@ async function fetchGoogleSheetRecords(tabName){
 // fails its own fetch and is skipped — it never blocks the others. Returns
 // both the merged records and the list of tab names that were found, so the
 // UI can tell the user exactly what got synced.
+//
+// "report" is the original legacy tab and still holds every month's rows in
+// one place. Now that monthly tabs (Aug, Sep, ...) exist alongside it, a
+// month that has its own dedicated tab must be read from THAT tab only —
+// otherwise its rows would be counted twice (once from report, once from
+// its month tab) and the totals for that month would be wrong. So: any
+// "report" row whose date falls in Aug is dropped once an "Aug" tab is
+// found, and its Aug rows come from the Aug tab instead — same for Sep,
+// and any future month tab. Months that DON'T have their own tab yet keep
+// being served from "report" as a fallback, so nothing goes missing.
 async function fetchAllGoogleSheetRecords(){
   const results = await Promise.allSettled(
     GOOGLE_SHEET_TABS.map(tab => fetchGoogleSheetRecords(tab))
   );
-  let merged = [];
+  const byTab = {};
   const foundTabs = [];
   const failedTabs = [];
   results.forEach((res, i)=>{
     const tab = GOOGLE_SHEET_TABS[i];
     if(res.status === 'fulfilled' && res.value.length){
-      merged = merged.concat(res.value);
+      byTab[tab] = res.value;
       foundTabs.push(tab);
     } else if(res.status === 'rejected'){
       failedTabs.push(tab);
@@ -1277,6 +1317,23 @@ async function fetchAllGoogleSheetRecords(){
   if(!foundTabs.length){
     throw new Error('No matching tabs found (checked: ' + GOOGLE_SHEET_TABS.join(', ') + ')');
   }
+
+  const dedicatedMonthTabs = new Set(foundTabs.filter(t => t !== 'report'));
+
+  let merged = [];
+  foundTabs.forEach(tab=>{
+    const rows = byTab[tab];
+    if(tab === 'report'){
+      merged = merged.concat(rows.filter(r=>{
+        const abbr = isoMonthAbbr(r['Date']);
+        // Keep the row only if no dedicated tab is claiming this month.
+        return !(abbr && dedicatedMonthTabs.has(abbr));
+      }));
+    } else {
+      merged = merged.concat(rows);
+    }
+  });
+
   return { records: merged, foundTabs, failedTabs };
 }
 
