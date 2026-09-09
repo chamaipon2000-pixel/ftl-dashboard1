@@ -925,7 +925,15 @@ const GOOGLE_SHEET_ID = '1kLF2mj_kc3gVoiOTyfuLMo0bcYP5B3ef';
 // tab (Sep, Oct, Nov, ...) the moment it's created — as long as it's named
 // with the standard 3-letter English month abbreviation (matching "Sep"),
 // nothing else needs to change here when a new month starts.
-const GOOGLE_SHEET_TABS = ['report','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Only list tabs that actually exist in the sheet. Requesting a tab name
+// that doesn't exist can make Google's gviz endpoint silently fall back to
+// returning the first/default sheet's data instead of erroring out — so a
+// speculative full Jan..Dec list caused the same Aug/Sep rows to come back
+// under several different "found" tab names and get counted many times
+// over (this is why the row count was wildly inflated). Add a month here
+// only once its dedicated tab actually exists in the spreadsheet, using its
+// exact (case-sensitive) tab name.
+const GOOGLE_SHEET_TABS = ['Aug 2026','Sep 2026'];
 const AUTO_REFRESH_MS = 3 * 60 * 1000; // 3 minutes
 
 // ---------- State ----------
