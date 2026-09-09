@@ -216,7 +216,9 @@
   }
   .data-source-bar b{ color:var(--ink); }
   .data-source-bar.updated{ border-left-color:var(--green); }
+  .data-source-bar.sync-error{ border-left-color:var(--red); }
   .data-source-bar .status-icon{ color:var(--green); font-weight:700; margin-right:4px; }
+  .data-source-bar .status-icon.error{ color:var(--red); }
 
   .period-strip{
     display:flex;
@@ -1339,6 +1341,7 @@ async function fetchAllGoogleSheetRecords(){
 
 let autoRefreshTimer = null;
 let isSyncing = false;
+let hasEverSynced = false; // true once a Google Sheet sync has succeeded at least once
 
 function setSyncStatus(mode, text){
   syncDot.className = 'sync-dot' + (mode === 'live' ? ' live' : mode === 'error' ? ' error' : '');
@@ -1371,14 +1374,24 @@ async function syncFromGoogleSheet(isManual){
 
     const stamp = new Date().toLocaleString('en-US', { dateStyle:'medium', timeStyle:'short' });
     const tabsLabel = foundTabs.join(', ');
+    dataSourceBar.classList.remove('sync-error');
     dataSourceText.innerHTML = `<span class="status-icon">●</span><b>Data source:</b> Google Sheet (live) &middot; tabs: ${tabsLabel} &middot; synced ${stamp} &middot; ${records.length.toLocaleString()} rows`;
     dataSourceBar.classList.add('updated');
     setSyncStatus('live', `Live · synced ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
     if(isManual) showToast(`Synced with Google Sheet (${tabsLabel} · ${records.length.toLocaleString()} rows)`);
+    hasEverSynced = true;
   }catch(err){
     console.error(err);
     setSyncStatus('error', 'Sync failed — using last data');
-    if(isManual){
+    // Surface this loudly on the data-source bar itself — not just the small
+    // status dot — every time it happens, so a failure right after page load
+    // (before anyone has clicked Refresh) is never silently invisible. The
+    // toast is still limited to manual refreshes / the very first attempt so
+    // auto-refresh failures every 3 minutes don't spam the screen.
+    dataSourceBar.classList.remove('updated');
+    dataSourceBar.classList.add('sync-error');
+    dataSourceText.innerHTML = `<span class="status-icon error">●</span><b>Google Sheet sync failed:</b> ${err.message} — checked tabs: ${GOOGLE_SHEET_TABS.join(', ')}. Showing ${dataSourceMode === 'google-sheet' ? 'last successful sync' : 'the embedded fallback snapshot, NOT live data'}.`;
+    if(isManual || !hasEverSynced){
       showToast('Google Sheet sync failed: ' + err.message + ' — try Upload File as a fallback', true);
     }
   }finally{
