@@ -490,7 +490,7 @@
   .trend-chart{
     display:flex;
     align-items:flex-end;
-    gap:10px;
+    gap:4px;
     height:200px;
     padding-top:16px;
     overflow-x:auto;
@@ -500,16 +500,16 @@
     flex-direction:column;
     align-items:center;
     justify-content:flex-end;
-    min-width:38px;
-    flex:1 0 auto;
+    min-width:0;
+    flex:1 1 0;
     height:100%;
   }
   .trend-bar-value{
-    font-size:11.5px;
+    font-size:10.5px;
     font-family:"JetBrains Mono",monospace;
     color:var(--ink);
     font-weight:700;
-    margin-bottom:6px;
+    margin-bottom:5px;
     white-space:nowrap;
   }
   .trend-bar{
@@ -607,6 +607,33 @@
     white-space:nowrap;
   }
   tbody tr:hover{ background:var(--paper); }
+  .table-pagination{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding-top:14px;
+    margin-top:6px;
+    border-top:1px solid var(--line);
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .table-pagination-info{ font-size:12.5px; color:var(--slate); }
+  .table-pagination-controls{ display:flex; align-items:center; gap:10px; }
+  .table-pagination-controls button{
+    border:1px solid var(--line);
+    background:var(--card);
+    color:var(--ink);
+    font-size:12.5px;
+    font-weight:600;
+    padding:6px 12px;
+    border-radius:7px;
+    cursor:pointer;
+    font-family:inherit;
+    transition:.15s;
+  }
+  .table-pagination-controls button:hover:not(:disabled){ background:var(--paper); border-color:var(--navy-deep); }
+  .table-pagination-controls button:disabled{ opacity:.4; cursor:not-allowed; }
+  .table-pagination-page{ font-size:12.5px; color:var(--slate); font-weight:600; min-width:78px; text-align:center; }
   .num{ font-family:"JetBrains Mono",monospace; text-align:right; }
   .pill{
     display:inline-block;
@@ -1610,7 +1637,7 @@ function renderTripTrendPanel(){
     const dates = Object.keys(map).sort();
     const entries = dates.map(d=>({
       value: map[d],
-      label: fmtDateShort(d),
+      label: d.split('-')[2],
       tooltip: `${fmtDate(d)}: ${map[d].toLocaleString()} trips`,
       selected: state.view === 'day' && state.period === d
     }));
@@ -1945,6 +1972,10 @@ function renderZoneBars(rows){
 }
 
 // ---------- Render table ----------
+const TABLE_PAGE_SIZE = 20;
+let tablePage = 1;
+let tablePageSignature = null; // tracks the active filter selection so paging resets when it changes
+
 function renderTable(rows){
   const wrap = document.getElementById('tableWrap');
   if(!rows.length){
@@ -1952,6 +1983,23 @@ function renderTable(rows){
     return;
   }
   const sorted = rows.slice().sort((a,b)=> (a.date+String(a.no).padStart(4,'0')).localeCompare(b.date+String(b.no).padStart(4,'0')));
+
+  // Reset to page 1 whenever the active view/period/project/sub-contractor
+  // selection changes, so switching filters never strands you on a page
+  // number that no longer exists. A background live-sync (same filters,
+  // same signature) does NOT reset the page, so you stay put while data
+  // refreshes underneath you.
+  const signature = `${state.view}|${state.period}|${state.rangeFrom}|${state.rangeTo}|${state.project}|${state.subcontractor}`;
+  if(signature !== tablePageSignature){
+    tablePage = 1;
+    tablePageSignature = signature;
+  }
+  const totalPages = Math.max(1, Math.ceil(sorted.length / TABLE_PAGE_SIZE));
+  if(tablePage > totalPages) tablePage = totalPages;
+  if(tablePage < 1) tablePage = 1;
+  const startIdx = (tablePage - 1) * TABLE_PAGE_SIZE;
+  const pageRows = sorted.slice(startIdx, startIdx + TABLE_PAGE_SIZE);
+
   wrap.innerHTML = `
     <table>
       <thead>
@@ -1964,7 +2012,7 @@ function renderTable(rows){
         </tr>
       </thead>
       <tbody>
-        ${sorted.map(r=>`
+        ${pageRows.map(r=>`
           <tr>
             <td class="mono">${r.no}</td>
             <td class="mono">${r.date}</td>
@@ -1986,7 +2034,19 @@ function renderTable(rows){
         `).join('')}
       </tbody>
     </table>
+    <div class="table-pagination">
+      <span class="table-pagination-info">Showing ${startIdx + 1}–${Math.min(startIdx + TABLE_PAGE_SIZE, sorted.length)} of ${sorted.length.toLocaleString()}</span>
+      <div class="table-pagination-controls">
+        <button id="tablePrevBtn" ${tablePage <= 1 ? 'disabled' : ''}>‹ Prev</button>
+        <span class="table-pagination-page">Page ${tablePage} / ${totalPages}</span>
+        <button id="tableNextBtn" ${tablePage >= totalPages ? 'disabled' : ''}>Next ›</button>
+      </div>
+    </div>
   `;
+  const prevBtn = document.getElementById('tablePrevBtn');
+  const nextBtn = document.getElementById('tableNextBtn');
+  if(prevBtn) prevBtn.addEventListener('click', ()=>{ tablePage--; renderTable(rows); });
+  if(nextBtn) nextBtn.addEventListener('click', ()=>{ tablePage++; renderTable(rows); });
 }
 
 // ---------- Master render ----------
