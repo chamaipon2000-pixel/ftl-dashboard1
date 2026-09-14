@@ -933,7 +933,12 @@ const GOOGLE_SHEET_ID = '1kLF2mj_kc3gVoiOTyfuLMo0bcYP5B3ef';
 // over (this is why the row count was wildly inflated). Add a month here
 // only once its dedicated tab actually exists in the spreadsheet, using its
 // exact (case-sensitive) tab name.
-const GOOGLE_SHEET_TABS = ['Aug 2026','Sep 2026'];
+//
+// These point at formula-mirrored "(raw)" tabs (e.g. ={'Aug 2026'!A1:P10000})
+// rather than the working "Aug 2026" / "Sep 2026" tabs directly, so that a
+// Basic Filter someone applies on the working tab to eyeball data never
+// hides rows from the dashboard — the mirror always reflects every row.
+const GOOGLE_SHEET_TABS = ['Aug 2026 (raw)','Sep 2026 (raw)'];
 const AUTO_REFRESH_MS = 3 * 60 * 1000; // 3 minutes
 
 // ---------- State ----------
