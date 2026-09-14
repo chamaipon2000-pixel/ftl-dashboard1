@@ -172,7 +172,8 @@
     align-items:center;
     gap:6px;
   }
-  .filter-bar .range-inputs input[type="date"]{
+  .filter-bar .range-inputs input[type="date"],
+  .filter-bar > input[type="date"]{
     background:var(--paper);
     color:var(--ink);
     border:1px solid var(--line);
@@ -183,7 +184,8 @@
     cursor:pointer;
     outline:none;
   }
-  .filter-bar .range-inputs input[type="date"]:focus{ border-color:var(--amber); }
+  .filter-bar .range-inputs input[type="date"]:focus,
+  .filter-bar > input[type="date"]:focus{ border-color:var(--amber); }
   .filter-bar .range-inputs .range-sep{ color:var(--slate-light); font-size:13px; }
   .filter-bar .clear-filters-btn{
     margin-left:auto;
@@ -719,6 +721,7 @@
       <button data-view="all">All</button>
     </div>
     <select id="periodSelect"></select>
+    <input type="date" id="periodDateInput" style="display:none;">
     <span class="range-inputs" id="rangeInputs" style="display:none;">
       <input type="date" id="rangeFrom">
       <span class="range-sep">&ndash;</span>
@@ -985,6 +988,7 @@ let state = { view: 'day', period: ALL_DATES[ALL_DATES.length-1] || null, projec
 // ---------- Controls ----------
 const viewToggle = document.getElementById('viewToggle');
 const periodSelect = document.getElementById('periodSelect');
+const periodDateInput = document.getElementById('periodDateInput');
 const rangeInputs = document.getElementById('rangeInputs');
 const rangeFromInput = document.getElementById('rangeFrom');
 const rangeToInput = document.getElementById('rangeTo');
@@ -1013,6 +1017,12 @@ viewToggle.addEventListener('click', (e)=>{
 
 periodSelect.addEventListener('change', ()=>{
   state.period = periodSelect.value;
+  render();
+});
+
+periodDateInput.addEventListener('change', ()=>{
+  if(!periodDateInput.value) return;
+  state.period = periodDateInput.value;
   render();
 });
 
@@ -1058,6 +1068,7 @@ function populatePeriodSelect(){
 
   if(state.view === 'range'){
     periodSelect.style.display = 'none';
+    periodDateInput.style.display = 'none';
     rangeInputs.style.display = 'flex';
     state.period = null;
 
@@ -1089,15 +1100,39 @@ function populatePeriodSelect(){
 
   if(state.view === 'all'){
     periodSelect.style.display = 'none';
+    periodDateInput.style.display = 'none';
     state.period = null;
     return;
   }
+
+  if(state.view === 'day'){
+    // Calendar-style date picker instead of a long flat dropdown of every
+    // single day — easier to jump to a date, especially once several
+    // months of data have piled up.
+    periodSelect.style.display = 'none';
+    periodDateInput.style.display = 'inline-block';
+    if(!ALL_DATES.includes(state.period)){
+      state.period = ALL_DATES[ALL_DATES.length-1] || null;
+    }
+    if(ALL_DATES.length){
+      periodDateInput.min = ALL_DATES[0];
+      periodDateInput.max = ALL_DATES[ALL_DATES.length-1];
+    }else{
+      periodDateInput.removeAttribute('min');
+      periodDateInput.removeAttribute('max');
+    }
+    if(state.period) periodDateInput.value = state.period;
+    return;
+  }
+
+  // Monthly view — short list, a dropdown is still the quickest way to pick.
+  periodDateInput.style.display = 'none';
   periodSelect.style.display = 'inline-block';
-  const list = state.view === 'day' ? ALL_DATES : ALL_MONTHS;
+  const list = ALL_MONTHS;
   list.slice().reverse().forEach(v=>{
     const opt = document.createElement('option');
     opt.value = v;
-    opt.textContent = state.view === 'day' ? fmtDate(v) : fmtMonth(v);
+    opt.textContent = fmtMonth(v);
     periodSelect.appendChild(opt);
   });
   if(!list.includes(state.period)){
