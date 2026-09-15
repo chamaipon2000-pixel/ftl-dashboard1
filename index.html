@@ -307,6 +307,7 @@
     align-items:stretch;
   }
   .panels.panels-3{ grid-template-columns:repeat(2,1fr); }
+  .panels.panels-1{ grid-template-columns:1fr; }
   @media (max-width:960px){ .panels, .panels.panels-3{ grid-template-columns:1fr 1fr; } }
   @media (max-width:620px){ .panels, .panels.panels-3{ grid-template-columns:1fr; } }
 
@@ -807,6 +808,14 @@
     </div>
   </div>
 
+  <div class="panels panels-1">
+    <div class="panel">
+      <div class="panel-title">Transport Cost by Project</div>
+      <div class="panel-desc">Total Transpost Cost (฿) per project for the selected period</div>
+      <div class="panel-body" id="costByProjectBars"></div>
+    </div>
+  </div>
+
   <div class="trend-panel">
     <div class="trend-panel-header">
       <div>
@@ -927,7 +936,11 @@ function buildDataset(rawRecords){
       subcontractor: (r["Sub-contractor"] !== '' && r["Sub-contractor"] !== null && r["Sub-contractor"] !== undefined) ? String(r["Sub-contractor"]) : '',
       case: toNum(r["Case"]) || 0,
       ontime: r["Ontime"] || '',
-      util: util
+      util: util,
+      // Only present in tabs/rows that have the "Transpost Cost" column filled
+      // in (currently just Sep 2026 (raw)) — null (not 0) means "no cost data
+      // recorded for this row", so it can be told apart from an actual ฿0.
+      cost: toNum(r["Transpost Cost"])
     };
   });
 }
@@ -1309,7 +1322,7 @@ function isoMonthAbbr(dateStr){
 // Temperature chart to show everything as Unspecified for the Sep tab).
 // normalizeHeader tolerates whitespace/case differences and a couple of
 // common real-world variants so a new tab doesn't need identical formatting.
-const CANONICAL_HEADERS = ["No.","Date","Project","Routh","Province","Driver","Car registration","Type","Temperature","Q'ty Box/Order","Trip","Sub-contractor","Case","Ontime","% Utilization","Zone"];
+const CANONICAL_HEADERS = ["No.","Date","Project","Routh","Province","Driver","Car registration","Type","Temperature","Q'ty Box/Order","Trip","Sub-contractor","Case","Ontime","% Utilization","Zone","Transpost Cost"];
 const HEADER_ALIASES = {
   'temp': 'Temperature',
   'car reg': 'Car registration',
@@ -1317,7 +1330,13 @@ const HEADER_ALIASES = {
   'subcontractor': 'Sub-contractor',
   'sub contractor': 'Sub-contractor',
   'qty box/order': "Q'ty Box/Order",
-  'utilization': '% Utilization'
+  'utilization': '% Utilization',
+  // "Transpost Cost" is the exact header currently used in the sheet
+  // (Sep 2026 (raw), column P) — these aliases keep the mapping working if
+  // it's ever fixed to the correct spelling "Transport Cost", or shortened.
+  'transport cost': 'Transpost Cost',
+  'transportation cost': 'Transpost Cost',
+  'cost': 'Transpost Cost'
 };
 function normalizeHeader(raw){
   const trimmed = (raw || '').toString().trim();
@@ -1544,6 +1563,33 @@ function renderProjectBars(rows){
       <div class="bar-name">${name}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${(count/max*100).toFixed(0)}%;background:linear-gradient(90deg,#3B6EDC,#7AA2F0)"></div></div>
       <div class="bar-val">${count}</div>
+    </div>
+  `).join('');
+}
+
+// ---------- Render cost-by-project bars ----------
+function renderCostByProjectBars(rows){
+  const el = document.getElementById('costByProjectBars');
+  // Only rows that actually have a recorded cost count — most Aug rows (and
+  // any tab without the "Transpost Cost" column) have cost === null, which
+  // must NOT be treated as ฿0, or every project would look free that month.
+  const rowsWithCost = rows.filter(r => r.cost !== null);
+  if(!rowsWithCost.length){
+    el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No Transpost Cost data for the selected period (currently only recorded in Sep 2026 (raw))</div>';
+    return;
+  }
+  const totals = {};
+  rowsWithCost.forEach(r=>{
+    const key = r.project || '—';
+    totals[key] = (totals[key] || 0) + r.cost;
+  });
+  const entries = Object.entries(totals).sort((a,b)=>b[1]-a[1]);
+  const max = entries.length ? entries[0][1] : 1;
+  el.innerHTML = entries.map(([name,total])=>`
+    <div class="bar-row">
+      <div class="bar-name">${name}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${max ? (total/max*100).toFixed(0) : 0}%;background:linear-gradient(90deg,#2E9E6D,#6FCF97)"></div></div>
+      <div class="bar-val">฿${Math.round(total).toLocaleString()}</div>
     </div>
   `).join('');
 }
@@ -2109,6 +2155,7 @@ function render(){
   renderKpis(computeKpis(rows));
   renderTripTrendPanel();
   renderProjectBars(rows);
+  renderCostByProjectBars(rows);
   renderSubcontractorBars(rows);
   renderUtilBars(rows);
   renderTypeBars(rows);
