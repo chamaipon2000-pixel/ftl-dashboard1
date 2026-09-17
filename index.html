@@ -913,6 +913,24 @@ const SUB_CAPACITY = {
   'FUZE':   { total: 13, byType: { '4W': 13 } }
 };
 
+// Sub-contractor names get typed with inconsistent casing in the sheet
+// (e.g. "FUZE" on most rows, "Fuze" on a few) — that makes the same
+// sub-contractor show up as two separate bars/entries everywhere in the
+// dashboard (By Sub-contractor chart, Sub Capacity page, filters, etc.),
+// and rows using the "wrong" casing silently show "no capacity data" too,
+// since they don't match a SUB_CAPACITY key exactly. Build a
+// case-insensitive lookup to the canonical spelling used as SUB_CAPACITY's
+// keys, and normalize every sub-contractor value through it in buildDataset
+// below. Anything that doesn't match a known sub is left as typed (trimmed)
+// rather than forced into a bucket it may not belong to.
+const SUB_CANONICAL_LOOKUP = {};
+Object.keys(SUB_CAPACITY).forEach(name => { SUB_CANONICAL_LOOKUP[name.toLowerCase()] = name; });
+function normalizeSubcontractor(raw){
+  const trimmed = (raw === null || raw === undefined) ? '' : String(raw).trim();
+  if(!trimmed) return '';
+  return SUB_CANONICAL_LOOKUP[trimmed.toLowerCase()] || trimmed;
+}
+
 function buildDataset(rawRecords){
   return rawRecords.map(r => {
     const box = toNum(r["Q'ty Box/Order"]);
@@ -933,7 +951,7 @@ function buildDataset(rawRecords){
       zone: r["Zone"] || '',
       box: box,
       trip: toNum(r["Trip"]) || 0,
-      subcontractor: (r["Sub-contractor"] !== '' && r["Sub-contractor"] !== null && r["Sub-contractor"] !== undefined) ? String(r["Sub-contractor"]) : '',
+      subcontractor: normalizeSubcontractor(r["Sub-contractor"]),
       case: toNum(r["Case"]) || 0,
       ontime: r["Ontime"] || '',
       util: util,
