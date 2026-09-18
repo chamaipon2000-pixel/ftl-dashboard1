@@ -1533,6 +1533,18 @@ function getFiltered(){
   return rows;
 }
 
+// Same Project / Sub-contractor filters as getFiltered(), but without the
+// day/month/range date filter — for panels like Trip Volume that manage
+// their own date grouping (daily/weekly/monthly) independently of the main
+// period selector, yet should still respect the Project/Sub-contractor
+// dropdowns like every other panel does.
+function getEntityFiltered(){
+  let rows = DATA;
+  if(state.project !== 'all') rows = rows.filter(d=>d.project === state.project);
+  if(state.subcontractor !== 'all') rows = rows.filter(d=>d.subcontractor === state.subcontractor);
+  return rows;
+}
+
 // ---------- KPI computation ----------
 function computeKpis(rows){
   const boxOrder = rows.reduce((s,r)=> s + (r.box || 0), 0);
@@ -1659,24 +1671,45 @@ function renderUtilBars(rows){
 // ---------- Trip Volume trend panel (Daily / Week / Month toggle) ----------
 let tripTrendState = { mode: 'day', month: null };
 
-// Returns the Monday (calendar week start) for a given "YYYY-MM-DD" date string.
-function weekStart(dateStr){
-  const [y,mo,day] = dateStr.split('-').map(Number);
-  const d = new Date(Date.UTC(y, mo-1, day));
-  const dow = d.getUTCDay(); // 0=Sun..6=Sat
-  const diffToMonday = (dow === 0) ? 6 : dow - 1;
-  d.setUTCDate(d.getUTCDate() - diffToMonday);
-  return d;
-}
-function weekKey(mondayDate){
-  return mondayDate.toISOString().slice(0,10);
-}
 function fmtWeekLabel(mondayDate){
   const monEnd = new Date(mondayDate);
   monEnd.setUTCDate(monEnd.getUTCDate() + 6);
   const mo1 = monthNamesEN[String(mondayDate.getUTCMonth()+1).padStart(2,'0')] || '';
   const mo2 = monthNamesEN[String(monEnd.getUTCMonth()+1).padStart(2,'0')] || '';
   const d1 = mondayDate.getUTCDate(), d2 = monEnd.getUTCDate();
+  return mo1 === mo2 ? `${d1}-${d2} ${mo1}` : `${d1} ${mo1} - ${d2} ${mo2}`;
+}
+
+// Matches Excel/Google Sheets' default WEEKNUM(date, 1): weeks run
+// Sunday–Saturday, and January 1st always falls in week 1 (so week 1 can be
+// shorter than 7 days, same as it is in a spreadsheet). Returns both the
+// week number and the calendar year it belongs to, since a week number
+// alone is ambiguous across a year boundary.
+function excelWeekNum(dateStr){
+  const [y, mo, day] = dateStr.split('-').map(Number);
+  const d = new Date(Date.UTC(y, mo-1, day));
+  const jan1 = new Date(Date.UTC(y, 0, 1));
+  const dayOfYear = Math.round((d - jan1) / 86400000) + 1; // Jan 1 = 1
+  const jan1Dow = jan1.getUTCDay(); // 0=Sun..6=Sat
+  const week = Math.floor((dayOfYear + jan1Dow - 1) / 7) + 1;
+  return { year: y, week };
+}
+// Sunday date that starts a given Excel week number/year — used to render a
+// human-readable date range under the "Week N" label.
+function excelWeekStart(year, week){
+  const jan1 = new Date(Date.UTC(year, 0, 1));
+  const jan1Dow = jan1.getUTCDay();
+  const d = new Date(jan1);
+  d.setUTCDate(d.getUTCDate() - jan1Dow + (week - 1) * 7);
+  return d;
+}
+function fmtExcelWeekLabel(year, week){
+  const start = excelWeekStart(year, week);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  const mo1 = monthNamesEN[String(start.getUTCMonth()+1).padStart(2,'0')] || '';
+  const mo2 = monthNamesEN[String(end.getUTCMonth()+1).padStart(2,'0')] || '';
+  const d1 = start.getUTCDate(), d2 = end.getUTCDate();
   return mo1 === mo2 ? `${d1}-${d2} ${mo1}` : `${d1} ${mo1} - ${d2} ${mo2}`;
 }
 
@@ -1721,7 +1754,7 @@ function renderTripTrendPanel(){
     btn.classList.toggle('active', btn.dataset.mode === tripTrendState.mode);
   });
   const monthSelect = document.getElementById('tripTrendMonthSelect');
-  monthSelect.hidden = (tripTrendState.mode === 'month');
+  monthSelect.hidden = (tripTrendState.mode === 'month' || tripTrendState.mode === 'week');
 
   const titleEl = document.getElementById('tripTrendTitle');
   const descEl = document.getElementById('tripTrendDesc');
@@ -1730,7 +1763,7 @@ function renderTripTrendPanel(){
   if(tripTrendState.mode === 'day'){
     titleEl.textContent = 'Trip Volume — Daily';
     descEl.textContent = `Total trips per day for ${monthLabel}`;
-    const rows = DATA.filter(r=>r.month === tripTrendState.month);
+    const rows = getEntityFiltered().filter(r=>r.month === tripTrendState.month);
     const map = {};
     rows.forEach(r=>{ if(r.date) map[r.date] = (map[r.date]||0) + (r.trip||0); });
     const dates = Object.keys(map).sort();
@@ -1744,24 +1777,31 @@ function renderTripTrendPanel(){
 
   } else if(tripTrendState.mode === 'week'){
     titleEl.textContent = 'Trip Volume — Weekly';
-    descEl.textContent = `Total trips per week (Mon\u2013Sun) for ${monthLabel}`;
-    const rows = DATA.filter(r=>r.month === tripTrendState.month);
-    const map = {}; // weekKey (Monday's date) -> total trips
-    const mondayOf = {}; // weekKey -> Date object
+    // Spans the whole dataset (not just one month) — every week that has at
+    // least one trip shows up here, in year+week order, regardless of which
+    // month(s) it falls in.
+    descEl.textContent = `Total trips per week (Sun\u2013Sat, matching Excel's WEEKNUM), across all months`;
+    const rows = getEntityFiltered();
+    const map = {}; // "year-week" -> total trips
+    const weekInfo = {}; // "year-week" -> {year, week}
     rows.forEach(r=>{
       if(!r.date) return;
-      const mon = weekStart(r.date);
-      const key = weekKey(mon);
-      mondayOf[key] = mon;
+      const { year, week } = excelWeekNum(r.date);
+      const key = `${year}-${week}`;
+      weekInfo[key] = { year, week };
       map[key] = (map[key] || 0) + (r.trip || 0);
     });
-    const weekKeys = Object.keys(map).sort();
-    const entries = weekKeys.map((k, i)=>{
-      const label = fmtWeekLabel(mondayOf[k]);
+    const weekKeys = Object.keys(map).sort((a,b)=>{
+      const wa = weekInfo[a], wb = weekInfo[b];
+      return (wa.year - wb.year) || (wa.week - wb.week);
+    });
+    const entries = weekKeys.map(k=>{
+      const { year, week } = weekInfo[k];
+      const label = fmtExcelWeekLabel(year, week);
       return {
         value: map[k],
-        label: `W${i + 1}`,
-        tooltip: `Week ${i + 1} (${label}): ${map[k].toLocaleString()} trips`,
+        label: `W${week}`,
+        tooltip: `Week ${week} (${label}): ${map[k].toLocaleString()} trips`,
         selected: false
       };
     });
@@ -1770,7 +1810,7 @@ function renderTripTrendPanel(){
   } else {
     titleEl.textContent = 'Trip Volume — Monthly';
     descEl.textContent = 'Total trips per month across the full dataset';
-    const rows = DATA;
+    const rows = getEntityFiltered();
     const map = {};
     rows.forEach(r=>{ if(r.month) map[r.month] = (map[r.month]||0) + (r.trip||0); });
     const months = Object.keys(map).sort();
