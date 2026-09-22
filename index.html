@@ -659,6 +659,25 @@
     border-radius:3px;
     flex:none;
   }
+  .compare-chart-wrap{ position:relative; }
+  .compare-chart-tooltip{
+    position:absolute;
+    display:none;
+    pointer-events:none;
+    background:var(--navy-deep);
+    color:#fff;
+    font-size:12px;
+    font-weight:600;
+    padding:6px 10px;
+    border-radius:7px;
+    white-space:nowrap;
+    transform:translate(-50%,-100%);
+    box-shadow:0 4px 14px rgba(0,0,0,.25);
+    z-index:5;
+  }
+  .compare-chart-tooltip .tt-project{ color:var(--slate-light); font-weight:500; margin-right:5px; }
+  .compare-hit-dot{ cursor:pointer; }
+  .compare-dot{ transition:r .1s; }
   .num{ font-family:"JetBrains Mono",monospace; text-align:right; }
   .pill{
     display:inline-block;
@@ -1730,12 +1749,28 @@ function renderProjectWeeklyComparison(){
 
   const lines = projects.map((p, pi)=>{
     const color = PROJECT_COMPARE_COLORS[pi % PROJECT_COMPARE_COLORS.length];
-    const points = weekKeys.map((k,i)=> `${xFor(i)},${yFor((projectTotals[p] && projectTotals[p][k]) || 0)}`).join(' ');
-    const dots = weekKeys.map((k,i)=>{
+    const pointList = weekKeys.map((k,i)=>{
       const v = (projectTotals[p] && projectTotals[p][k]) || 0;
-      return `<circle cx="${xFor(i)}" cy="${yFor(v)}" r="3" fill="${color}"><title>${p} \u2014 Week ${weekInfo[k].week}: ${v.toLocaleString()} trips</title></circle>`;
+      return { cx: xFor(i), cy: yFor(v), week: weekInfo[k].week, value: v };
+    });
+    const points = pointList.map(pt=>`${pt.cx},${pt.cy}`).join(' ');
+    const dots = pointList.map(pt=>{
+      const leftPct = (pt.cx / W * 100).toFixed(2);
+      const topPct = (pt.cy / H * 100).toFixed(2);
+      // Small visible dot for looks, plus a bigger invisible one on top as the
+      // actual hover target (far easier to point at than the 3px dot alone).
+      return `<circle class="compare-dot" cx="${pt.cx}" cy="${pt.cy}" r="3" fill="${color}"/>`
+        + `<circle class="compare-hit-dot" cx="${pt.cx}" cy="${pt.cy}" r="10" fill="transparent"`
+        + ` data-project="${p.replace(/"/g,'&quot;')}" data-week="${pt.week}" data-value="${pt.value}"`
+        + ` data-left="${leftPct}" data-top="${topPct}" data-color="${color}"/>`;
     }).join('');
-    return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+    // A wide, invisible copy of the line sits on top so hovering anywhere
+    // along the line (not just exactly on a dot) also triggers the tooltip,
+    // snapping to whichever week is nearest the cursor.
+    const hitPointsJson = JSON.stringify(pointList).replace(/"/g,'&quot;');
+    const hitLine = `<polyline class="compare-hit-line" points="${points}" fill="none" stroke="transparent" stroke-width="16"`
+      + ` data-project="${p.replace(/"/g,'&quot;')}" data-color="${color}" data-points="${hitPointsJson}"/>`;
+    return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${hitLine}${dots}`;
   }).join('');
 
   const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${gridLines}${lines}${xLabels}</svg>`;
@@ -1745,7 +1780,51 @@ function renderProjectWeeklyComparison(){
     return `<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${color}"></span>${p}</div>`;
   }).join('');
 
-  el.innerHTML = svg + `<div class="compare-chart-legend">${legend}</div>`;
+  el.innerHTML = `<div class="compare-chart-wrap">${svg}<div class="compare-chart-tooltip" id="compareChartTooltip"></div></div><div class="compare-chart-legend">${legend}</div>`;
+
+  // Wire up hover: show project name + trip count next to whichever point
+  // the mouse is nearest, positioned with % coordinates so it lines up
+  // correctly regardless of how wide the panel has been scaled to render.
+  const tooltip = document.getElementById('compareChartTooltip');
+  const showTooltip = (project, week, value, leftPct, topPct, color)=>{
+    tooltip.innerHTML = `<span class="tt-project">${project}</span>Week ${week}: ${Number(value).toLocaleString()} trips`;
+    tooltip.style.borderLeft = `3px solid ${color}`;
+    tooltip.style.left = leftPct + '%';
+    tooltip.style.top = topPct + '%';
+    tooltip.style.display = 'block';
+  };
+  const hideTooltip = ()=>{ tooltip.style.display = 'none'; };
+
+  el.querySelectorAll('.compare-hit-dot').forEach(dot=>{
+    dot.addEventListener('mouseenter', ()=>{
+      const { project, week, value, left, top, color } = dot.dataset;
+      showTooltip(project, week, value, left, top, color);
+      dot.previousElementSibling && dot.previousElementSibling.setAttribute('r', '5');
+    });
+    dot.addEventListener('mouseleave', ()=>{
+      hideTooltip();
+      dot.previousElementSibling && dot.previousElementSibling.setAttribute('r', '3');
+    });
+  });
+
+  const svgEl = el.querySelector('svg');
+  el.querySelectorAll('.compare-hit-line').forEach(line=>{
+    const project = line.dataset.project;
+    const color = line.dataset.color;
+    const pts = JSON.parse(line.dataset.points);
+    line.addEventListener('mousemove', (e)=>{
+      const rect = svgEl.getBoundingClientRect();
+      const scale = rect.width / W;
+      const svgX = (e.clientX - rect.left) / scale;
+      let nearest = pts[0], best = Infinity;
+      pts.forEach(pt=>{
+        const d = Math.abs(pt.cx - svgX);
+        if(d < best){ best = d; nearest = pt; }
+      });
+      showTooltip(project, nearest.week, nearest.value, (nearest.cx / W * 100).toFixed(2), (nearest.cy / H * 100).toFixed(2), color);
+    });
+    line.addEventListener('mouseleave', hideTooltip);
+  });
 }
 
 // ---------- Render subcontractor bars ----------
