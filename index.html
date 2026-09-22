@@ -637,6 +637,28 @@
   .table-pagination-controls button:hover:not(:disabled){ background:var(--paper); border-color:var(--navy-deep); }
   .table-pagination-controls button:disabled{ opacity:.4; cursor:not-allowed; }
   .table-pagination-page{ font-size:12.5px; color:var(--slate); font-weight:600; min-width:78px; text-align:center; }
+  .compare-chart-legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:14px;
+    margin-top:10px;
+    padding-top:12px;
+    border-top:1px solid var(--line);
+  }
+  .compare-chart-legend-item{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:12px;
+    color:var(--slate);
+    font-weight:600;
+  }
+  .compare-chart-legend-swatch{
+    width:10px;
+    height:10px;
+    border-radius:3px;
+    flex:none;
+  }
   .num{ font-family:"JetBrains Mono",monospace; text-align:right; }
   .pill{
     display:inline-block;
@@ -813,6 +835,14 @@
       <div class="panel-title">Transport Cost by Project</div>
       <div class="panel-desc">Total Transpost Cost (฿) per project for the selected period</div>
       <div class="panel-body" id="costByProjectBars"></div>
+    </div>
+  </div>
+
+  <div class="panels panels-1">
+    <div class="panel">
+      <div class="panel-title">Trip Volume by Project — Weekly</div>
+      <div class="panel-desc">Trips per week (Sun–Sat, matching Excel's WEEKNUM), compared across projects, spanning the full dataset</div>
+      <div class="panel-body" id="projectWeeklyCompareChart"></div>
     </div>
   </div>
 
@@ -1637,6 +1667,87 @@ function renderCostByProjectBars(rows){
   `).join('');
 }
 
+// ---------- Render Trip Volume by Project — Weekly comparison chart ----------
+const PROJECT_COMPARE_COLORS = ['#7C5CFC', '#E8863A', '#2E9E6D', '#D64545', '#2F80ED', '#C2A833', '#8E44AD', '#16A3B8', '#EA4C89', '#556B2F'];
+
+function renderProjectWeeklyComparison(){
+  const el = document.getElementById('projectWeeklyCompareChart');
+  // Same Project/Sub-contractor filters as Trip Volume — Weekly, and likewise
+  // spans the whole dataset (every week that has data), not just one month,
+  // so trends across projects can be compared over the full period on file.
+  const rows = getEntityFiltered();
+  const projects = [...new Set(rows.map(r=>r.project).filter(Boolean))].sort();
+
+  const weekInfo = {}; // "year-week" -> {year, week}
+  const projectTotals = {}; // project -> "year-week" -> total trips
+  rows.forEach(r=>{
+    if(!r.date || !r.project) return;
+    const { year, week } = excelWeekNum(r.date);
+    const key = `${year}-${week}`;
+    weekInfo[key] = { year, week };
+    if(!projectTotals[r.project]) projectTotals[r.project] = {};
+    projectTotals[r.project][key] = (projectTotals[r.project][key] || 0) + (r.trip || 0);
+  });
+  const weekKeys = Object.keys(weekInfo).sort((a,b)=>{
+    const wa = weekInfo[a], wb = weekInfo[b];
+    return (wa.year - wb.year) || (wa.week - wb.week);
+  });
+
+  if(!weekKeys.length || !projects.length){
+    el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data for the selected filters</div>';
+    return;
+  }
+
+  let maxVal = 0;
+  projects.forEach(p=>{
+    weekKeys.forEach(k=>{
+      const v = (projectTotals[p] && projectTotals[p][k]) || 0;
+      if(v > maxVal) maxVal = v;
+    });
+  });
+  if(maxVal === 0) maxVal = 1;
+
+  const W = 900, H = 260;
+  const padLeft = 40, padRight = 16, padTop = 16, padBottom = 34;
+  const chartW = W - padLeft - padRight;
+  const chartH = H - padTop - padBottom;
+  const stepX = weekKeys.length > 1 ? chartW / (weekKeys.length - 1) : 0;
+  const xFor = (i) => padLeft + (weekKeys.length > 1 ? i * stepX : chartW / 2);
+  const yFor = (v) => padTop + chartH - (v / maxVal) * chartH;
+
+  const gridLines = [0, 0.5, 1].map(frac=>{
+    const y = padTop + chartH - frac * chartH;
+    const val = Math.round(maxVal * frac);
+    return `<line x1="${padLeft}" y1="${y}" x2="${W - padRight}" y2="${y}" stroke="var(--line)" stroke-width="1"/>
+      <text x="${padLeft - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--slate-light)" font-family="JetBrains Mono, monospace">${val}</text>`;
+  }).join('');
+
+  // Thin out x-axis labels once there are too many weeks to keep them legible.
+  const xLabels = weekKeys.map((k,i)=>{
+    if(weekKeys.length > 14 && i % 2 !== 0 && i !== weekKeys.length - 1) return '';
+    return `<text x="${xFor(i)}" y="${H - padBottom + 16}" text-anchor="middle" font-size="10" fill="var(--slate-light)">W${weekInfo[k].week}</text>`;
+  }).join('');
+
+  const lines = projects.map((p, pi)=>{
+    const color = PROJECT_COMPARE_COLORS[pi % PROJECT_COMPARE_COLORS.length];
+    const points = weekKeys.map((k,i)=> `${xFor(i)},${yFor((projectTotals[p] && projectTotals[p][k]) || 0)}`).join(' ');
+    const dots = weekKeys.map((k,i)=>{
+      const v = (projectTotals[p] && projectTotals[p][k]) || 0;
+      return `<circle cx="${xFor(i)}" cy="${yFor(v)}" r="3" fill="${color}"><title>${p} \u2014 Week ${weekInfo[k].week}: ${v.toLocaleString()} trips</title></circle>`;
+    }).join('');
+    return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+  }).join('');
+
+  const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${gridLines}${lines}${xLabels}</svg>`;
+
+  const legend = projects.map((p,pi)=>{
+    const color = PROJECT_COMPARE_COLORS[pi % PROJECT_COMPARE_COLORS.length];
+    return `<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${color}"></span>${p}</div>`;
+  }).join('');
+
+  el.innerHTML = svg + `<div class="compare-chart-legend">${legend}</div>`;
+}
+
 // ---------- Render subcontractor bars ----------
 function renderSubcontractorBars(rows){
   const counts = {};
@@ -2227,6 +2338,7 @@ function render(){
   renderTripTrendPanel();
   renderProjectBars(rows);
   renderCostByProjectBars(rows);
+  renderProjectWeeklyComparison();
   renderSubcontractorBars(rows);
   renderUtilBars(rows);
   renderTypeBars(rows);
