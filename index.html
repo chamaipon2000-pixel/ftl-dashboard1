@@ -1015,6 +1015,13 @@ function refreshIndexes(){
 refreshIndexes();
 
 let state = { view: 'day', period: ALL_DATES[ALL_DATES.length-1] || null, project: 'all', subcontractor: 'all', rangeFrom: null, rangeTo: null };
+// True once the person has manually picked a date/month via the Daily or
+// Monthly selector. Until then, every successful sync (including the very
+// first one on page load) keeps snapping the period to the newest date
+// available — so opening the dashboard fresh always shows the latest data,
+// not whatever date happened to be in the small embedded snapshot that
+// renders before the first live sync completes.
+let userPickedPeriod = false;
 
 // ---------- Controls ----------
 const viewToggle = document.getElementById('viewToggle');
@@ -1048,12 +1055,14 @@ viewToggle.addEventListener('click', (e)=>{
 
 periodSelect.addEventListener('change', ()=>{
   state.period = periodSelect.value;
+  userPickedPeriod = true;
   render();
 });
 
 periodDateInput.addEventListener('change', ()=>{
   if(!periodDateInput.value) return;
   state.period = periodDateInput.value;
+  userPickedPeriod = true;
   render();
 });
 
@@ -1474,10 +1483,14 @@ async function syncFromGoogleSheet(isManual){
     refreshIndexes();
     dataSourceMode = 'google-sheet';
 
-    // Snap to the latest day only if the currently-selected period no longer exists
+    // Snap to the latest day/month whenever the person hasn't manually
+    // picked one yet (so a fresh page load always lands on today's data,
+    // not a stale default), or whenever their previously-picked period no
+    // longer exists in the refreshed data.
     if(state.view === 'day' || state.view === 'month'){
-      if(!((state.view === 'day' ? ALL_DATES : ALL_MONTHS).includes(state.period))){
-        state.period = (state.view === 'day' ? ALL_DATES : ALL_MONTHS).slice(-1)[0] || null;
+      const list = (state.view === 'day' ? ALL_DATES : ALL_MONTHS);
+      if(!userPickedPeriod || !list.includes(state.period)){
+        state.period = list[list.length-1] || null;
       }
     }
     populatePeriodSelect();
