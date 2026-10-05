@@ -997,9 +997,11 @@ function buildDataset(rawRecords){
       plate: r["Car registration"] || '',
       type: r["Type"] || '',
       temperature: r["Temperature"] || '',
-      zone: r["Zone"] || '',
+      zone: String(r["Zone"] || '').replace(/[\u0E3A\u200B\uFEFF]/g,'').trim(),
       box: box,
-      trip: toNum(r["Trip"]) || 0,
+      // Oct 2026 tab leaves the Trip column empty; every row is one trip in
+      // the other months, so a blank Trip counts as 1 (an explicit 0 stays 0).
+      trip: (r["Trip"] === '' || r["Trip"] === null || r["Trip"] === undefined) ? 1 : (toNum(r["Trip"]) || 0),
       subcontractor: normalizeSubcontractor(r["Sub-contractor"]),
       case: toNum(r["Case"]) || 0,
       ontime: r["Ontime"] || '',
@@ -1048,7 +1050,7 @@ const GOOGLE_SHEET_ID = '1kLF2mj_kc3gVoiOTyfuLMo0bcYP5B3ef';
 // rather than the working "Aug 2026" / "Sep 2026" tabs directly, so that a
 // Basic Filter someone applies on the working tab to eyeball data never
 // hides rows from the dashboard — the mirror always reflects every row.
-const GOOGLE_SHEET_TABS = ['Aug 2026 (raw)','Sep 2026 (raw)'];
+const GOOGLE_SHEET_TABS = ['Aug 2026 (raw)','Sep 2026 (raw)','Oct 2026 (raw)'];
 const AUTO_REFRESH_MS = 3 * 60 * 1000; // 3 minutes
 
 // ---------- State ----------
@@ -1419,6 +1421,8 @@ function normalizeHeader(raw){
   const lower = trimmed.toLowerCase();
   const exact = CANONICAL_HEADERS.find(c => c.toLowerCase() === lower);
   if(exact) return exact;
+  // Oct 2026 tab header is "Case (เหตุการณ์ผิดพลาดที่เกิดขึ้นในการจัดส่ง)"
+  if(/^case\b/.test(lower)) return 'Case';
   if(HEADER_ALIASES[lower]) return HEADER_ALIASES[lower];
   return trimmed;
 }
