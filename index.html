@@ -798,12 +798,12 @@
   <div class="panels panels-3">
     <div class="panel">
       <div class="panel-title">By Vehicle Type</div>
-      <div class="panel-desc">Number of vehicles (unique plates) by type: 4W / 6W / 10W</div>
+      <div class="panel-desc">Number of trips by type: 4W / 6W / 10W</div>
       <div class="panel-body" id="typeBars"></div>
     </div>
     <div class="panel">
       <div class="panel-title">By Temperature</div>
-      <div class="panel-desc">Number of vehicles (unique plates) by Frozen / Chilled / Dry</div>
+      <div class="panel-desc">Number of trips by Frozen / Chilled / Dry</div>
       <div class="util-legend">
         <span><i class="dot" style="background:#3B82F6"></i>Frozen</span>
         <span><i class="dot" style="background:#22B8CF"></i>Chilled</span>
@@ -813,7 +813,7 @@
     </div>
     <div class="panel">
       <div class="panel-title">By Zone</div>
-      <div class="panel-desc">Number of vehicles (unique plates) by BKK / Upcountry</div>
+      <div class="panel-desc">Number of trips by BKK / Upcountry</div>
       <div class="util-legend">
         <span><i class="dot" style="background:#3B82F6"></i>BKK</span>
         <span><i class="dot" style="background:#E8863A"></i>Upcountry</span>
@@ -822,7 +822,7 @@
     </div>
     <div class="panel">
       <div class="panel-title">% Utilization Distribution</div>
-      <div class="panel-desc">Share of orders by truck space utilization range</div>
+      <div class="panel-desc">Share of trips by truck space utilization range</div>
       <div class="util-legend">
         <span><i class="dot" style="background:#D64545"></i>&lt;50%</span>
         <span><i class="dot" style="background:#E8863A"></i>50–99%</span>
@@ -839,12 +839,12 @@
   <div class="panels">
     <div class="panel">
       <div class="panel-title">By Project</div>
-      <div class="panel-desc">Number of orders per project</div>
+      <div class="panel-desc">Number of trips per project</div>
       <div class="panel-body" id="projectBars"></div>
     </div>
     <div class="panel">
       <div class="panel-title">By Sub-contractor</div>
-      <div class="panel-desc">Number of orders per subcontractor</div>
+      <div class="panel-desc">Number of trips per subcontractor</div>
       <div class="panel-body" id="subcontractorBars"></div>
     </div>
   </div>
@@ -1648,7 +1648,7 @@ function renderProjectBars(rows){
   const counts = {};
   rows.forEach(r=>{
     const key = r.project || '—';
-    counts[key] = (counts[key]||0) + 1;
+    counts[key] = (counts[key]||0) + (r.trip || 0); // count by Trip, same as the Trip KPI
   });
   const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
   const max = entries.length ? entries[0][1] : 1;
@@ -1836,7 +1836,7 @@ function renderSubcontractorBars(rows){
   const counts = {};
   rows.forEach(r=>{
     const key = r.subcontractor || '—';
-    counts[key] = (counts[key]||0) + 1;
+    counts[key] = (counts[key]||0) + (r.trip || 0); // count by Trip, same as the Trip KPI
   });
   const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
   const max = entries.length ? entries[0][1] : 1;
@@ -1855,11 +1855,12 @@ function renderSubcontractorBars(rows){
 function renderUtilBars(rows){
   let low=0, mid=0, high=0;
   rows.forEach(r=>{
-    if(r.util < 0.5) low++;
-    else if(r.util < 1.0) mid++;
-    else high++;
+    const t = r.trip || 0; // count by Trip, same as the Trip KPI
+    if(r.util < 0.5) low += t;
+    else if(r.util < 1.0) mid += t;
+    else high += t;
   });
-  const total = rows.length || 1;
+  const total = (low + mid + high) || 1;
   const el = document.getElementById('utilBars');
   const bands = [
     { label:'< 50%', count: low, color:'#D64545' },
@@ -2254,14 +2255,12 @@ document.getElementById('capacitySortSelect').addEventListener('change', (e)=>{
 });
 
 function renderVehicleBars(rows, keyFn, elId, colorMap, defaultColor, emptyLabel){
-  const map = {}; // key -> Set of plates
+  const map = {}; // key -> total trips (counted per row, same as the Trip KPI)
   rows.forEach(r=>{
     const key = (keyFn(r) || '').toString().trim() || emptyLabel;
-    if(!map[key]) map[key] = new Set();
-    if(r.plate) map[key].add(r.plate);
-    else map[key].add(`__no-plate-${r.no}`); // still count the order if plate is missing
+    map[key] = (map[key] || 0) + (r.trip || 0);
   });
-  const entries = Object.entries(map).map(([k,set])=>[k, set.size]).sort((a,b)=>b[1]-a[1]);
+  const entries = Object.entries(map).sort((a,b)=>b[1]-a[1]);
   const max = entries.length ? entries[0][1] : 1;
   const el = document.getElementById(elId);
   if(!entries.length){ el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data</div>'; return; }
@@ -2288,16 +2287,14 @@ function renderTemperatureBars(rows){
 }
 
 // Same as renderVehicleBars but also shows each bar's share of the total
-// (unique-plate count / sum of all category counts) as a percentage.
+// (trip count / sum of all category counts) as a percentage.
 function renderVehicleBarsWithPercent(rows, keyFn, elId, colorMap, defaultColor, emptyLabel){
-  const map = {}; // key -> Set of plates
+  const map = {}; // key -> total trips (counted per row, same as the Trip KPI)
   rows.forEach(r=>{
     const key = (keyFn(r) || '').toString().trim() || emptyLabel;
-    if(!map[key]) map[key] = new Set();
-    if(r.plate) map[key].add(r.plate);
-    else map[key].add(`__no-plate-${r.no}`);
+    map[key] = (map[key] || 0) + (r.trip || 0);
   });
-  const entries = Object.entries(map).map(([k,set])=>[k, set.size]).sort((a,b)=>b[1]-a[1]);
+  const entries = Object.entries(map).sort((a,b)=>b[1]-a[1]);
   const el = document.getElementById(elId);
   if(!entries.length){ el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data</div>'; return; }
   const total = entries.reduce((sum,[,c])=>sum+c, 0) || 1;
