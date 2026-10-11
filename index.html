@@ -813,10 +813,15 @@
     </div>
     <div class="panel">
       <div class="panel-title">By Zone</div>
-      <div class="panel-desc">Number of trips by BKK / Upcountry</div>
+      <div class="panel-desc">Number of trips by region: BKK / Central / West / East / North / North East / South</div>
       <div class="util-legend">
         <span><i class="dot" style="background:#3B82F6"></i>BKK</span>
-        <span><i class="dot" style="background:#E8863A"></i>Upcountry</span>
+        <span><i class="dot" style="background:#7A56D6"></i>Central</span>
+        <span><i class="dot" style="background:#22B8CF"></i>West</span>
+        <span><i class="dot" style="background:#E8863A"></i>East</span>
+        <span><i class="dot" style="background:#16A34A"></i>North</span>
+        <span><i class="dot" style="background:#E5484D"></i>North East</span>
+        <span><i class="dot" style="background:#D4A017"></i>South</span>
       </div>
       <div class="panel-body" id="zoneBars"></div>
     </div>
@@ -980,6 +985,52 @@ function normalizeSubcontractor(raw){
   return SUB_CANONICAL_LOOKUP[trimmed.toLowerCase()] || trimmed;
 }
 
+// ---------- Zone (7 regions) ----------
+// BKK = Bangkok + metro (Nonthaburi, Pathum Thani, Samut Prakan), matching the
+// BKK### route codes. Edit the lists below if the company groups provinces differently.
+const ZONE_ORDER = ['BKK','Central','West','East','North','North East','South'];
+const ZONE_PROVINCES = {
+  'BKK': ['กรุงเทพมหานคร','กรุงเทพ','นนทบุรี','ปทุมธานี','สมุทรปราการ'],
+  'Central': ['พระนครศรีอยุธยา','อ่างทอง','ลพบุรี','สระบุรี','สิงห์บุรี','ชัยนาท','สุพรรณบุรี','นครนายก','นครปฐม','สมุทรสาคร','ฉะเชิงเทรา','ปราจีนบุรี','สระแก้ว'],
+  'West': ['กาญจนบุรี','ราชบุรี','เพชรบุรี','ประจวบคีรีขันธ์','สมุทรสงคราม'],
+  'East': ['ชลบุรี','ระยอง','จันทบุรี','ตราด'],
+  'North': ['เชียงใหม่','เชียงราย','ลำพูน','ลำปาง','แพร่','น่าน','พะเยา','แม่ฮ่องสอน','อุตรดิตถ์','สุโขทัย','ตาก','กำแพงเพชร','พิษณุโลก','พิจิตร','เพชรบูรณ์','นครสวรรค์','อุทัยธานี'],
+  'North East': ['ขอนแก่น','ชัยภูมิ','นครราชสีมา','บุรีรัมย์','สุรินทร์','ศรีสะเกษ','อุบลราชธานี','อำนาจเจริญ','ยโสธร','กาฬสินธุ์','มหาสารคาม','ร้อยเอ็ด','มุกดาหาร','นครพนม','สกลนคร','เลย','หนองคาย','อุดรธานี','หนองบัวลำภู','บึงกาฬ'],
+  'South': ['ชุมพร','สุราษฎร์ธานี','ระนอง','พังงา','ภูเก็ต','กระบี่','นครศรีธรรมราช','พัทลุง','ตรัง','สตูล','สงขลา','ปัตตานี','ยะลา','นราธิวาส']
+};
+const PROVINCE_TO_ZONE = {};
+Object.keys(ZONE_PROVINCES).forEach(z => ZONE_PROVINCES[z].forEach(p => { PROVINCE_TO_ZONE[p] = z; }));
+const ROUTE_PREFIX_TO_ZONE = { BKK:'BKK', CEN:'Central', WES:'West', EAS:'East', NOR:'North', NES:'North East', SOU:'South' };
+const ZONE_ALIASES = {
+  'bkk':'BKK','bangkok':'BKK','กทม':'BKK','กรุงเทพ':'BKK',
+  'central':'Central','cen':'Central','ภาคกลาง':'Central',
+  'west':'West','western':'West','ภาคตะวันตก':'West',
+  'east':'East','eastern':'East','ภาคตะวันออก':'East',
+  'north':'North','northern':'North','ภาคเหนือ':'North',
+  'north east':'North East','northeast':'North East','north-east':'North East','ne':'North East','isan':'North East','ภาคอีสาน':'North East','ภาคตะวันออกเฉียงเหนือ':'North East',
+  'south':'South','southern':'South','ภาคใต้':'South'
+};
+function normalizeZoneName(raw){
+  const k = String(raw || '').replace(/[\u0E3A\u200B\uFEFF]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+  return ZONE_ALIASES[k] || '';
+}
+function deriveZone(r){
+  // 1) sheet "Zone" column already filled with one of the non-BKK regions -> trust it
+  const sheetZone = normalizeZoneName(r["Zone"]);
+  if(sheetZone && sheetZone !== 'BKK') return sheetZone;
+  // 2) route code prefix (Rich project: BKK001, CEN002, EAS001, WES003, NOR004, NES005, SOU001 ...)
+  const m = String(r["Routh"] || '').trim().toUpperCase().match(/^(BKK|CEN|WES|EAS|NOR|NES|SOU)\d/);
+  if(m) return ROUTE_PREFIX_TO_ZONE[m[1]];
+  // 3) province names (exact token match on the first recognised province)
+  const tokens = String(r["Province"] || '').split(/[,\s>/]+/).map(t => t.trim()).filter(Boolean);
+  for(const t of tokens){ if(PROVINCE_TO_ZONE[t]) return PROVINCE_TO_ZONE[t]; }
+  // 4) EAA / SFS are Bangkok-area deliveries (store / area names rather than provinces)
+  const proj = String(r["Project"] || '').trim().toUpperCase();
+  if(proj === 'EAA' || proj === 'SFS') return 'BKK';
+  // 5) fall back to sheet value 'BKK' if that is all we have
+  return sheetZone || '';
+}
+
 function buildDataset(rawRecords){
   return rawRecords.map(r => {
     const box = toNum(r["Q'ty Box/Order"]);
@@ -997,7 +1048,7 @@ function buildDataset(rawRecords){
       plate: r["Car registration"] || '',
       type: r["Type"] || '',
       temperature: r["Temperature"] || '',
-      zone: String(r["Zone"] || '').replace(/[\u0E3A\u200B\uFEFF]/g,'').trim(),
+      zone: deriveZone(r),
       box: box,
       // Oct 2026 tab leaves the Trip column empty; every row is one trip in
       // the other months, so a blank Trip counts as 1 (an explicit 0 stays 0).
@@ -2277,7 +2328,7 @@ function renderVehicleBars(rows, keyFn, elId, colorMap, defaultColor, emptyLabel
 
 const TYPE_COLORS = { '4W':'#7A56D6', '6W':'#5A3FB0', '10W':'#3D2A85' };
 const TEMP_COLORS = { 'Frozen':'#3B82F6', 'Chilled':'#22B8CF', 'Dry':'#E8863A' };
-const ZONE_COLORS = { 'BKK':'#3B82F6', 'Upcountry':'#E8863A' };
+const ZONE_COLORS = { 'BKK':'#3B82F6', 'Central':'#7A56D6', 'West':'#22B8CF', 'East':'#E8863A', 'North':'#16A34A', 'North East':'#E5484D', 'South':'#D4A017' };
 
 function renderTypeBars(rows){
   renderVehicleBars(rows, r=>r.type, 'typeBars', TYPE_COLORS, '#94A3B8', 'Unspecified');
@@ -2311,7 +2362,28 @@ function renderVehicleBarsWithPercent(rows, keyFn, elId, colorMap, defaultColor,
   `;}).join('');
 }
 function renderZoneBars(rows){
-  renderVehicleBarsWithPercent(rows, r=>r.zone, 'zoneBars', ZONE_COLORS, '#94A3B8', 'Unspecified');
+  // Fixed order: BKK, Central, West, East, North, North East, South (all 7 always shown)
+  const map = {};
+  rows.forEach(r=>{
+    const key = ZONE_ORDER.includes(r.zone) ? r.zone : 'Unspecified';
+    map[key] = (map[key] || 0) + (r.trip || 0);
+  });
+  const el = document.getElementById('zoneBars');
+  const keys = ZONE_ORDER.concat(map['Unspecified'] ? ['Unspecified'] : []);
+  const total = keys.reduce((sum,k)=>sum+(map[k]||0), 0);
+  if(!total){ el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data</div>'; return; }
+  const max = Math.max(...keys.map(k=>map[k]||0)) || 1;
+  el.innerHTML = keys.map(name=>{
+    const count = map[name] || 0;
+    const color = ZONE_COLORS[name] || '#94A3B8';
+    const pct = ((count/total)*100).toFixed(1);
+    return `
+    <div class="bar-row" style="grid-template-columns:96px 1fr 96px;">
+      <div class="bar-name" style="color:${color}">${name}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(count/max*100).toFixed(0)}%;background:${color}"></div></div>
+      <div class="bar-val">${count} <span style="opacity:.6;font-weight:400;">(${pct}%)</span></div>
+    </div>
+  `;}).join('');
 }
 
 // ---------- Render table ----------
