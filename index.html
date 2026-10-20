@@ -637,6 +637,33 @@
   .table-pagination-controls button:hover:not(:disabled){ background:var(--paper); border-color:var(--navy-deep); }
   .table-pagination-controls button:disabled{ opacity:.4; cursor:not-allowed; }
   .table-pagination-page{ font-size:12.5px; color:var(--slate); font-weight:600; min-width:78px; text-align:center; }
+
+  /* ===== Month-over-Month (same day range) ===== */
+  .mom-controls{ display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+  .mom-field{ display:flex; align-items:center; gap:6px; font-size:13px; color:var(--slate); font-weight:600; }
+  .mom-chips{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:14px; }
+  .mom-chips-label{ font-size:12px; color:var(--slate); font-weight:600; margin-right:4px; }
+  .mom-chip{
+    border:1px solid var(--line); background:var(--paper); color:var(--slate);
+    font-size:12px; font-weight:600; padding:5px 12px; border-radius:20px;
+    cursor:pointer; font-family:inherit; transition:.15s;
+  }
+  .mom-chip:hover{ border-color:var(--navy-deep); }
+  .mom-chip.active{ background:var(--navy-deep); border-color:var(--navy-deep); color:#fff; }
+  .mom-chip.util{ background:transparent; border-style:dashed; }
+  .mom-note{ font-size:12px; color:#B45309; background:var(--amber-soft); border-radius:8px; padding:8px 12px; margin-top:12px; }
+  .mom-table{ width:100%; border-collapse:collapse; font-size:13px; margin-top:16px; }
+  .mom-table th{ text-align:right; font-size:11.5px; color:var(--slate); font-weight:600; padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .mom-table th:first-child, .mom-table td:first-child{ text-align:left; }
+  .mom-table td{ text-align:right; padding:9px 10px; border-bottom:1px solid var(--line); font-family:"JetBrains Mono",monospace; white-space:nowrap; }
+  .mom-table td:first-child{ font-family:inherit; font-weight:600; }
+  .mom-table tr.mom-total td{ font-weight:700; background:var(--paper); border-bottom:none; }
+  .mom-delta{ font-size:10.5px; font-weight:700; margin-left:6px; padding:1px 6px; border-radius:20px; }
+  .mom-delta.up{ background:var(--green-soft); color:var(--green); }
+  .mom-delta.down{ background:#FBE5E5; color:var(--red); }
+  .mom-delta.flat{ background:var(--paper); color:var(--slate); }
+  .mom-th-sub{ display:block; font-weight:500; color:var(--slate-light); font-size:10.5px; }
+  .mom-bar:hover{ opacity:.85; }
   .compare-chart-legend{
     display:flex;
     flex-wrap:wrap;
@@ -885,6 +912,29 @@
       <div class="panel-title">Trip Volume by Project — Weekly</div>
       <div class="panel-desc">Trips per week (Sun–Sat, matching Excel's WEEKNUM), compared across projects, spanning the full dataset</div>
       <div class="panel-body" id="projectWeeklyCompareChart"></div>
+    </div>
+  </div>
+
+  <div class="panels panels-1">
+    <div class="panel">
+      <div class="panel-title">Month-over-Month — Same Day Range</div>
+      <div class="panel-desc" id="momDesc">Compare each month over the same days of the month (e.g. day 1–19 of every month), per project</div>
+      <div class="mom-controls">
+        <div class="mom-field">Day <select id="momFrom" class="trend-month-select"></select> to <select id="momTo" class="trend-month-select"></select></div>
+        <div class="seg trend-seg" id="momMetricToggle">
+          <button data-metric="trip" class="active">Trips</button>
+          <button data-metric="box">Boxes</button>
+          <button data-metric="order">Orders</button>
+        </div>
+        <div class="seg trend-seg" id="momGroupToggle">
+          <button data-group="project" class="active">Group by Project</button>
+          <button data-group="month">Group by Month</button>
+        </div>
+      </div>
+      <div class="mom-chips" id="momProjects"></div>
+      <div id="momChart"></div>
+      <div id="momTable" style="overflow-x:auto;"></div>
+      <div id="momNote"></div>
     </div>
   </div>
 
@@ -2609,6 +2659,180 @@ document.getElementById('wowWeekSelect').addEventListener('change', e=>{
   renderWeekOverWeek();
 });
 
+// ---------- Month-over-Month comparison over the same day range ----------
+const MOM_MONTH_COLORS = ['#94A3B8', '#2F80ED', '#E8863A', '#2E9E6D', '#7C5CFC', '#D64545', '#16A3B8', '#C2A833'];
+const MOM_METRICS = {
+  trip:  { label: 'Trips',  unit: 'trips',  val: r => r.trip || 0 },
+  box:   { label: 'Boxes',  unit: 'boxes',  val: r => r.box || 0 },
+  order: { label: 'Orders', unit: 'orders', val: r => 1 }
+};
+const momState = { from: 1, to: null, metric: 'trip', group: 'project', selected: null, ready: false };
+
+function momSetup(){
+  if(momState.ready) return;
+  momState.ready = true;
+  const opts = Array.from({length:31}, (_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');
+  const f = document.getElementById('momFrom'), t = document.getElementById('momTo');
+  f.innerHTML = opts; t.innerHTML = opts;
+  f.addEventListener('change', e=>{
+    momState.from = +e.target.value;
+    if(momState.to < momState.from) momState.to = momState.from;
+    renderMonthComparison();
+  });
+  t.addEventListener('change', e=>{
+    momState.to = +e.target.value;
+    if(momState.from > momState.to) momState.from = momState.to;
+    renderMonthComparison();
+  });
+  document.getElementById('momMetricToggle').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    momState.metric = b.dataset.metric; renderMonthComparison();
+  });
+  document.getElementById('momGroupToggle').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    momState.group = b.dataset.group; renderMonthComparison();
+  });
+  document.getElementById('momProjects').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    const all = momState.allProjects || [];
+    if(b.dataset.act === 'all'){ momState.selected = new Set(all); }
+    else if(b.dataset.act === 'none'){ momState.selected = new Set(); }
+    else {
+      const cur = new Set(momState.selected || all);
+      const p = b.dataset.project;
+      cur.has(p) ? cur.delete(p) : cur.add(p);
+      momState.selected = cur;
+    }
+    renderMonthComparison();
+  });
+}
+
+function renderMonthComparison(){
+  momSetup();
+  const chartEl = document.getElementById('momChart');
+  const tableEl = document.getElementById('momTable');
+  const noteEl  = document.getElementById('momNote');
+
+  // Sub-contractor filter applies; the project choice is this panel's own picker.
+  let rows = DATA.filter(r => r.date && r.project);
+  if(state.subcontractor !== 'all') rows = rows.filter(r => r.subcontractor === state.subcontractor);
+
+  const allProjects = [...new Set(rows.map(r=>r.project))].sort();
+  momState.allProjects = allProjects;
+  if(momState.selected) momState.selected = new Set([...momState.selected].filter(p=>allProjects.includes(p)));
+  const selected = momState.selected ? allProjects.filter(p=>momState.selected.has(p)) : allProjects;
+
+  // Default "to" = day-of-month of the latest date on file
+  if(!momState.to){
+    const last = ALL_DATES[ALL_DATES.length-1];
+    momState.to = last ? parseInt(last.slice(8,10), 10) : 31;
+    if(momState.to < momState.from) momState.from = 1;
+  }
+  const { from, to, metric, group } = momState;
+  document.getElementById('momFrom').value = from;
+  document.getElementById('momTo').value = to;
+  document.querySelectorAll('#momMetricToggle button').forEach(b=>b.classList.toggle('active', b.dataset.metric === metric));
+  document.querySelectorAll('#momGroupToggle button').forEach(b=>b.classList.toggle('active', b.dataset.group === group));
+
+  document.getElementById('momProjects').innerHTML =
+    '<span class="mom-chips-label">Projects:</span>' +
+    allProjects.map(p=>`<button class="mom-chip ${selected.includes(p)?'active':''}" data-project="${wowEsc(p)}">${wowEsc(p)}</button>`).join('') +
+    '<button class="mom-chip util" data-act="all">Select all</button><button class="mom-chip util" data-act="none">Clear</button>';
+
+  const M = MOM_METRICS[metric];
+  const rangeText = from === to ? `day ${from}` : `day ${from}–${to}`;
+  document.getElementById('momDesc').textContent =
+    `${M.label} for ${rangeText} of each month, compared month by month for the selected projects`;
+
+  const months = [...new Set(rows.map(r=>r.month).filter(Boolean))].sort();
+  if(!months.length || !selected.length){
+    chartEl.innerHTML = `<div style="color:var(--slate-light);font-size:12px;padding:20px 0;">${!selected.length ? 'Select at least one project above' : 'No data'}</div>`;
+    tableEl.innerHTML = ''; noteEl.innerHTML = ''; return;
+  }
+
+  // values[project][month], plus which dates actually have data in the range
+  const values = {}; selected.forEach(p=>{ values[p] = {}; months.forEach(m=>values[p][m]=0); });
+  const datesWithData = {}; months.forEach(m=>datesWithData[m] = new Set());
+  rows.forEach(r=>{
+    const day = parseInt(r.date.slice(8,10), 10);
+    if(day < from || day > to) return;
+    datesWithData[r.month].add(r.date);
+    if(values[r.project]) values[r.project][r.month] += M.val(r);
+  });
+  const totals = {}; months.forEach(m=>totals[m] = selected.reduce((s,p)=>s+values[p][m],0));
+
+  // ----- chart (grouped bars) -----
+  const byProject = group === 'project';
+  const groups = byProject ? selected : months;
+  const series = byProject ? months : selected;
+  const colorOf = (i) => byProject ? MOM_MONTH_COLORS[i % MOM_MONTH_COLORS.length] : PROJECT_COMPARE_COLORS[i % PROJECT_COMPARE_COLORS.length];
+  const valueOf = (g, sIdx) => byProject ? values[g][series[sIdx]] : values[series[sIdx]][g];
+  const groupLabel = g => byProject ? g : fmtMonth(g);
+  const seriesLabel = x => byProject ? fmtMonth(x) : x;
+
+  let maxVal = 0;
+  groups.forEach(g=>series.forEach((_,i)=>{ maxVal = Math.max(maxVal, valueOf(g,i)); }));
+  if(maxVal === 0) maxVal = 1;
+  // round the axis top up to a "nice" number so the grid labels are clean
+  { const mag = Math.pow(10, Math.floor(Math.log10(maxVal)));
+    const step = [1,1.2,1.5,2,2.5,3,4,5,6,8,10].find(k=>k*mag >= maxVal*1.08) || 10;
+    maxVal = step * mag; }
+
+  const W = 900, H = 300, padL = 48, padR = 16, padT = 22, padB = 38;
+  const cw = W - padL - padR, ch = H - padT - padB;
+  const gw = cw / groups.length;
+  const barW = Math.min(46, (gw * 0.78) / series.length);
+  const yFor = v => padT + ch - (v / maxVal) * ch;
+
+  const grid = [0, 0.25, 0.5, 0.75, 1].map(f=>{
+    const y = padT + ch - f*ch;
+    return `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)"/>
+      <text x="${padL-8}" y="${y+4}" text-anchor="end" font-size="10" fill="var(--slate-light)" font-family="JetBrains Mono, monospace">${Math.round(maxVal*f).toLocaleString()}</text>`;
+  }).join('');
+
+  const showLabels = barW >= 22 || groups.length * series.length <= 18;
+  let bars = '', xl = '';
+  groups.forEach((g, gi)=>{
+    const gx = padL + gi*gw + gw/2;
+    const startX = gx - (barW*series.length)/2;
+    series.forEach((sv, si)=>{
+      const v = valueOf(g, si);
+      const x = startX + si*barW;
+      const y = yFor(v);
+      const h = Math.max(padT + ch - y, v > 0 ? 1 : 0);
+      bars += `<rect class="mom-bar" x="${x+1}" y="${y}" width="${Math.max(barW-2,1)}" height="${h}" rx="3" fill="${colorOf(si)}"><title>${wowEsc(groupLabel(g))} · ${wowEsc(seriesLabel(sv))}: ${v.toLocaleString()} ${M.unit}</title></rect>`;
+      if(showLabels) bars += `<text x="${x+barW/2}" y="${y-5}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--ink)" font-family="JetBrains Mono, monospace">${Math.round(v).toLocaleString()}</text>`;
+    });
+    xl += `<text x="${gx}" y="${H-padB+20}" text-anchor="middle" font-size="12" font-weight="600" fill="var(--slate)">${wowEsc(groupLabel(g))}</text>`;
+  });
+
+  const legend = series.map((sv,i)=>`<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${colorOf(i)}"></span>${wowEsc(seriesLabel(sv))}</div>`).join('');
+  chartEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${grid}${bars}${xl}</svg><div class="compare-chart-legend">${legend}</div>`;
+
+  // ----- table with change vs previous month -----
+  const expectedDays = m => {
+    const [y, mo] = m.split('-').map(Number);
+    const dim = new Date(y, mo, 0).getDate();
+    return Math.max(0, Math.min(to, dim) - from + 1);
+  };
+  const delta = (cur, prev) => {
+    if(prev === undefined) return '';
+    if(!prev) return cur ? '<span class="mom-delta up">new</span>' : '';
+    const pct = (cur - prev) / prev * 100;
+    const cls = Math.abs(pct) < 0.05 ? 'flat' : (pct > 0 ? 'up' : 'down');
+    return `<span class="mom-delta ${cls}">${pct > 0 ? '▲' : pct < 0 ? '▼' : ''} ${Math.abs(pct).toFixed(1)}%</span>`;
+  };
+  const head = months.map(m=>`<th>${fmtMonth(m)}<span class="mom-th-sub">${datesWithData[m].size}/${expectedDays(m)} days with data</span></th>`).join('');
+  const bodyRows = selected.map(p=>`<tr><td>${wowEsc(p)}</td>${months.map((m,i)=>`<td>${values[p][m].toLocaleString()}${delta(values[p][m], i ? values[p][months[i-1]] : undefined)}</td>`).join('')}</tr>`).join('');
+  const totalRow = `<tr class="mom-total"><td>Total</td>${months.map((m,i)=>`<td>${totals[m].toLocaleString()}${delta(totals[m], i ? totals[months[i-1]] : undefined)}</td>`).join('')}</tr>`;
+  tableEl.innerHTML = `<table class="mom-table"><thead><tr><th>Project</th>${head}</tr></thead><tbody>${bodyRows}${totalRow}</tbody></table>`;
+
+  const partial = months.filter(m => datesWithData[m].size < expectedDays(m));
+  noteEl.innerHTML = partial.length
+    ? `<div class="mom-note">⚠ ${partial.map(m=>`${fmtMonth(m)} has data for only ${datesWithData[m].size} of ${expectedDays(m)} days in this range`).join(' · ')} — totals for these months may look lower than the others.</div>`
+    : '';
+}
+
 function render(){
   const rows = getFiltered();
   document.getElementById('periodText').textContent =
@@ -2635,6 +2859,7 @@ function render(){
   renderProjectBars(rows);
   renderCostByProjectBars(rows);
   renderProjectWeeklyComparison();
+  renderMonthComparison();
   renderWeekOverWeek();
   renderSubcontractorBars(rows);
   renderUtilBars(rows);
