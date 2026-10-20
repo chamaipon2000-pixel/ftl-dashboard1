@@ -641,7 +641,22 @@
   /* ===== Month-over-Month (same day range) ===== */
   .mom-controls{ display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
   .mom-field{ display:flex; align-items:center; gap:6px; font-size:13px; color:var(--slate); font-weight:600; }
-  .mom-project-select{ min-width:170px; }
+  .mom-multi{ position:relative; }
+  .mom-multi-btn{ min-width:200px; max-width:280px; text-align:left; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .mom-multi-btn span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mom-multi-btn::after{ content:'▾'; font-size:11px; color:var(--slate); flex:none; }
+  .mom-multi.open .mom-multi-btn{ border-color:var(--amber); }
+  .mom-multi-menu{
+    display:none; position:absolute; z-index:30; top:calc(100% + 6px); left:0; min-width:260px;
+    background:#fff; border:1px solid var(--line); border-radius:10px;
+    box-shadow:0 10px 30px rgba(15,23,42,.15); padding:6px; max-height:320px; overflow-y:auto;
+  }
+  .mom-multi.open .mom-multi-menu{ display:block; }
+  .mom-multi-actions{ display:flex; gap:12px; padding:6px 8px 8px; border-bottom:1px solid var(--line); margin-bottom:4px; }
+  .mom-multi-actions button{ border:none; background:none; font-family:inherit; font-size:12px; font-weight:600; color:var(--navy-deep); cursor:pointer; padding:0; text-decoration:underline; }
+  .mom-multi-item{ display:flex; align-items:center; gap:10px; padding:8px; border-radius:6px; font-size:13px; cursor:pointer; user-select:none; }
+  .mom-multi-item:hover{ background:var(--paper); }
+  .mom-multi-item input{ width:15px; height:15px; accent-color:var(--navy-deep); cursor:pointer; flex:none; }
   .mom-chips{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:14px; }
   .mom-chips-label{ font-size:12px; color:var(--slate); font-weight:600; margin-right:4px; }
   .mom-chip{
@@ -921,7 +936,7 @@
       <div class="panel-title">Month-over-Month — Same Day Range</div>
       <div class="panel-desc" id="momDesc">Compare each month over the same days of the month (e.g. day 1–19 of every month), per project</div>
       <div class="mom-controls">
-        <select id="momProject" class="trend-month-select mom-project-select"></select>
+        <div class="mom-multi" id="momProjectWrap"><button type="button" id="momProjectBtn" class="trend-month-select mom-multi-btn"><span>All Projects</span></button><div class="mom-multi-menu" id="momProjectMenu"></div></div>
         <div class="mom-field">Day <select id="momFrom" class="trend-month-select"></select> to <select id="momTo" class="trend-month-select"></select></div>
         <div class="seg trend-seg" id="momMetricToggle">
           <button data-metric="trip" class="active">Trips</button>
@@ -2667,7 +2682,7 @@ const MOM_METRICS = {
   box:   { label: 'Boxes',  unit: 'boxes',  val: r => r.box || 0 },
   order: { label: 'Orders', unit: 'orders', val: r => 1 }
 };
-const momState = { from: 1, to: null, metric: 'trip', group: 'project', project: 'all', ready: false };
+const momState = { from: 1, to: null, metric: 'trip', group: 'project', selected: null, ready: false };
 
 function momSetup(){
   if(momState.ready) return;
@@ -2693,8 +2708,26 @@ function momSetup(){
     const b = e.target.closest('button'); if(!b) return;
     momState.group = b.dataset.group; renderMonthComparison();
   });
-  document.getElementById('momProject').addEventListener('change', e=>{
-    momState.project = e.target.value; renderMonthComparison();
+  const wrap = document.getElementById('momProjectWrap');
+  document.getElementById('momProjectBtn').addEventListener('click', e=>{
+    e.stopPropagation(); wrap.classList.toggle('open');
+  });
+  document.addEventListener('click', e=>{ if(!wrap.contains(e.target)) wrap.classList.remove('open'); });
+  document.addEventListener('keydown', e=>{ if(e.key === 'Escape') wrap.classList.remove('open'); });
+  document.getElementById('momProjectMenu').addEventListener('click', e=>{
+    e.stopPropagation();
+    const act = e.target.closest('button[data-act]');
+    const all = momState.allProjects || [];
+    if(act){
+      momState.selected = act.dataset.act === 'all' ? null : new Set();
+      renderMonthComparison(); return;
+    }
+    const cb = e.target.closest('input[data-project]');
+    if(!cb) return;
+    const cur = new Set(momState.selected || all);
+    cb.checked ? cur.add(cb.dataset.project) : cur.delete(cb.dataset.project);
+    momState.selected = cur.size === all.length ? null : cur;
+    renderMonthComparison();
   });
 }
 
@@ -2709,8 +2742,12 @@ function renderMonthComparison(){
   if(state.subcontractor !== 'all') rows = rows.filter(r => r.subcontractor === state.subcontractor);
 
   const allProjects = [...new Set(rows.map(r=>r.project))].sort();
-  if(momState.project !== 'all' && !allProjects.includes(momState.project)) momState.project = 'all';
-  const selected = momState.project === 'all' ? allProjects : [momState.project];
+  momState.allProjects = allProjects;
+  if(momState.selected){
+    momState.selected = new Set([...momState.selected].filter(p=>allProjects.includes(p)));
+    if(momState.selected.size === allProjects.length) momState.selected = null;
+  }
+  const selected = momState.selected ? allProjects.filter(p=>momState.selected.has(p)) : allProjects;
 
   // Default "to" = day-of-month of the latest date on file
   if(!momState.to){
@@ -2724,10 +2761,17 @@ function renderMonthComparison(){
   document.querySelectorAll('#momMetricToggle button').forEach(b=>b.classList.toggle('active', b.dataset.metric === metric));
   document.querySelectorAll('#momGroupToggle button').forEach(b=>b.classList.toggle('active', b.dataset.group === group));
 
-  document.getElementById('momProject').innerHTML =
-    '<option value="all">All Projects</option>' +
-    allProjects.map(p=>`<option value="${wowEsc(p)}">${wowEsc(p)}</option>`).join('');
-  document.getElementById('momProject').value = momState.project;
+  const menu = document.getElementById('momProjectMenu');
+  const keepScroll = menu.scrollTop;
+  menu.innerHTML =
+    '<div class="mom-multi-actions"><button type="button" data-act="all">Select all</button><button type="button" data-act="none">Clear</button></div>' +
+    allProjects.map(p=>`<label class="mom-multi-item"><input type="checkbox" data-project="${wowEsc(p)}" ${selected.includes(p)?'checked':''}><span>${wowEsc(p)}</span></label>`).join('');
+  menu.scrollTop = keepScroll;
+  document.querySelector('#momProjectBtn span').textContent =
+    !momState.selected ? 'All Projects'
+    : selected.length === 0 ? 'No project selected'
+    : selected.length <= 2 ? selected.join(', ')
+    : `${selected.length} projects selected`;
 
   const M = MOM_METRICS[metric];
   const rangeText = from === to ? `day ${from}` : `day ${from}–${to}`;
@@ -2736,7 +2780,7 @@ function renderMonthComparison(){
 
   const months = [...new Set(rows.map(r=>r.month).filter(Boolean))].sort();
   if(!months.length || !selected.length){
-    chartEl.innerHTML = `<div style="color:var(--slate-light);font-size:12px;padding:20px 0;">No data</div>`;
+    chartEl.innerHTML = `<div style="color:var(--slate-light);font-size:12px;padding:20px 0;">${!selected.length ? 'Select at least one project' : 'No data'}</div>`;
     tableEl.innerHTML = ''; noteEl.innerHTML = ''; return;
   }
 
