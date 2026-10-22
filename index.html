@@ -2681,7 +2681,7 @@ const MOM_METRICS = {
   trip:  { label: 'Trips',  unit: 'trips',  val: r => r.trip || 0 },
   box:   { label: 'Boxes',  unit: 'boxes',  val: r => r.box || 0 }
 };
-const momState = { from: 1, to: null, metric: 'trip', group: 'month', selected: 'auto', monthsSel: 'all', ready: false };
+const momState = { from: 1, to: null, metric: 'trip', group: 'month', toManual: false, selected: 'auto', monthsSel: 'all', ready: false };
 
 function momSetup(){
   if(momState.ready) return;
@@ -2691,11 +2691,11 @@ function momSetup(){
   f.innerHTML = opts; t.innerHTML = opts;
   f.addEventListener('change', e=>{
     momState.from = +e.target.value;
-    if(momState.to < momState.from) momState.to = momState.from;
+    if(momState.to < momState.from){ momState.to = momState.from; momState.toManual = true; }
     renderMonthComparison();
   });
   t.addEventListener('change', e=>{
-    momState.to = +e.target.value;
+    momState.to = +e.target.value; momState.toManual = true;
     if(momState.from > momState.to) momState.from = momState.to;
     renderMonthComparison();
   });
@@ -2764,11 +2764,11 @@ function renderMonthComparison(){
   const allProjects = [...new Set(rows.map(r=>r.project))].sort();
   momState.allProjects = allProjects;
 
-  // Default "to" = day-of-month of the latest date on file
-  if(!momState.to){
-    const last = ALL_DATES[ALL_DATES.length-1];
-    momState.to = last ? parseInt(last.slice(8,10), 10) : 31;
-    if(momState.to < momState.from) momState.from = 1;
+  // Default range = day 1 to today's day of the month (e.g. 22 Oct -> 1 to 22, 27 Oct -> 1 to 27).
+  // Follows the clock until the user picks a "to" day themselves.
+  if(!momState.toManual){
+    momState.to = new Date().getDate();
+    if(momState.from > momState.to) momState.from = 1;
   }
   const { from, to, metric, group } = momState;
   document.getElementById('momFrom').value = from;
