@@ -656,6 +656,10 @@
   .mom-multi-actions button{ border:none; background:none; font-family:inherit; font-size:12px; font-weight:600; color:var(--navy-deep); cursor:pointer; padding:0; text-decoration:underline; }
   .mom-multi-item{ display:flex; align-items:center; gap:10px; padding:8px; border-radius:6px; font-size:13px; cursor:pointer; user-select:none; }
   .mom-multi-item:hover{ background:var(--paper); }
+  .mom-multi-item > span{ flex:1; }
+  .mom-only{ border:1px solid var(--line); background:#fff; color:var(--slate); font-family:inherit; font-size:11px; font-weight:600; padding:2px 9px; border-radius:20px; cursor:pointer; opacity:.55; }
+  .mom-multi-item:hover .mom-only{ opacity:1; }
+  .mom-only:hover{ background:var(--navy-deep); border-color:var(--navy-deep); color:#fff; }
   .mom-multi-item input{ width:15px; height:15px; accent-color:var(--navy-deep); cursor:pointer; flex:none; }
   .mom-chips{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:14px; }
   .mom-chips-label{ font-size:12px; color:var(--slate); font-weight:600; margin-right:4px; }
@@ -933,29 +937,6 @@
 
   <div class="panels panels-1">
     <div class="panel">
-      <div class="panel-title">Month-over-Month — Same Day Range</div>
-      <div class="panel-desc" id="momDesc">Compare each month over the same days of the month (e.g. day 1–19 of every month), per project</div>
-      <div class="mom-controls">
-        <div class="mom-multi" id="momProjectWrap"><button type="button" id="momProjectBtn" class="trend-month-select mom-multi-btn"><span>All Projects</span></button><div class="mom-multi-menu" id="momProjectMenu"></div></div>
-        <div class="mom-field">Day <select id="momFrom" class="trend-month-select"></select> to <select id="momTo" class="trend-month-select"></select></div>
-        <div class="seg trend-seg" id="momMetricToggle">
-          <button data-metric="trip" class="active">Trips</button>
-          <button data-metric="box">Boxes</button>
-          <button data-metric="order">Orders</button>
-        </div>
-        <div class="seg trend-seg" id="momGroupToggle">
-          <button data-group="project" class="active">Group by Project</button>
-          <button data-group="month">Group by Month</button>
-        </div>
-      </div>
-      <div id="momChart"></div>
-      <div id="momTable" style="overflow-x:auto;"></div>
-      <div id="momNote"></div>
-    </div>
-  </div>
-
-  <div class="panels panels-1">
-    <div class="panel">
       <div class="trend-panel-header" style="margin-bottom:10px;">
         <div>
           <div class="panel-title">Week-over-Week by Project</div>
@@ -967,6 +948,28 @@
       </div>
       <div id="wowSummary" style="font-size:13px;color:var(--slate);margin-bottom:12px;"></div>
       <div id="wowTable" style="overflow-x:auto;"></div>
+    </div>
+  </div>
+
+  <div class="panels panels-1">
+    <div class="panel">
+      <div class="panel-title">Month-over-Month — Same Day Range</div>
+      <div class="panel-desc" id="momDesc">Compare each month over the same days of the month (e.g. day 1–19 of every month), per project</div>
+      <div class="mom-controls">
+        <div class="mom-multi" id="momProjectWrap"><button type="button" id="momProjectBtn" class="trend-month-select mom-multi-btn"><span>All Projects</span></button><div class="mom-multi-menu" id="momProjectMenu"></div></div>
+        <div class="mom-field">Day <select id="momFrom" class="trend-month-select"></select> to <select id="momTo" class="trend-month-select"></select></div>
+        <div class="seg trend-seg" id="momMetricToggle">
+          <button data-metric="trip" class="active">Trips</button>
+          <button data-metric="box">Boxes</button>
+        </div>
+        <div class="seg trend-seg" id="momGroupToggle">
+          <button data-group="project" class="active">Group by Project</button>
+          <button data-group="month">Group by Month</button>
+        </div>
+      </div>
+      <div id="momChart"></div>
+      <div id="momTable" style="overflow-x:auto;"></div>
+      <div id="momNote"></div>
     </div>
   </div>
 
@@ -2679,10 +2682,9 @@ document.getElementById('wowWeekSelect').addEventListener('change', e=>{
 const MOM_MONTH_COLORS = ['#94A3B8', '#2F80ED', '#E8863A', '#2E9E6D', '#7C5CFC', '#D64545', '#16A3B8', '#C2A833'];
 const MOM_METRICS = {
   trip:  { label: 'Trips',  unit: 'trips',  val: r => r.trip || 0 },
-  box:   { label: 'Boxes',  unit: 'boxes',  val: r => r.box || 0 },
-  order: { label: 'Orders', unit: 'orders', val: r => 1 }
+  box:   { label: 'Boxes',  unit: 'boxes',  val: r => r.box || 0 }
 };
-const momState = { from: 1, to: null, metric: 'trip', group: 'project', selected: null, ready: false };
+const momState = { from: 1, to: null, metric: 'trip', group: 'project', selected: 'auto', ready: false };
 
 function momSetup(){
   if(momState.ready) return;
@@ -2716,17 +2718,20 @@ function momSetup(){
   document.addEventListener('keydown', e=>{ if(e.key === 'Escape') wrap.classList.remove('open'); });
   document.getElementById('momProjectMenu').addEventListener('click', e=>{
     e.stopPropagation();
+    const only = e.target.closest('button[data-only]');
+    if(only){ e.preventDefault(); momState.selected = new Set([only.dataset.only]); document.getElementById('momProjectWrap').classList.remove('open'); renderMonthComparison(); return; }
     const act = e.target.closest('button[data-act]');
     const all = momState.allProjects || [];
     if(act){
-      momState.selected = act.dataset.act === 'all' ? null : new Set();
+      momState.selected = act.dataset.act === 'all' ? new Set(all)
+                        : act.dataset.act === 'none' ? new Set() : 'auto';
       renderMonthComparison(); return;
     }
     const cb = e.target.closest('input[data-project]');
     if(!cb) return;
-    const cur = new Set(momState.selected || all);
+    const cur = new Set(momState.current || all);
     cb.checked ? cur.add(cb.dataset.project) : cur.delete(cb.dataset.project);
-    momState.selected = cur.size === all.length ? null : cur;
+    momState.selected = cur;
     renderMonthComparison();
   });
 }
@@ -2743,11 +2748,6 @@ function renderMonthComparison(){
 
   const allProjects = [...new Set(rows.map(r=>r.project))].sort();
   momState.allProjects = allProjects;
-  if(momState.selected){
-    momState.selected = new Set([...momState.selected].filter(p=>allProjects.includes(p)));
-    if(momState.selected.size === allProjects.length) momState.selected = null;
-  }
-  const selected = momState.selected ? allProjects.filter(p=>momState.selected.has(p)) : allProjects;
 
   // Default "to" = day-of-month of the latest date on file
   if(!momState.to){
@@ -2761,14 +2761,51 @@ function renderMonthComparison(){
   document.querySelectorAll('#momMetricToggle button').forEach(b=>b.classList.toggle('active', b.dataset.metric === metric));
   document.querySelectorAll('#momGroupToggle button').forEach(b=>b.classList.toggle('active', b.dataset.group === group));
 
+  const months = [...new Set(rows.map(r=>r.month).filter(Boolean))].sort();
+  const expectedDays = m => {
+    const [y, mo] = m.split('-').map(Number);
+    const dim = new Date(y, mo, 0).getDate();
+    return Math.max(0, Math.min(to, dim) - from + 1);
+  };
+
+  // Default selection: the 3 projects whose trip counts differ the most between months
+  // (largest max–min spread over the chosen day range). Months with incomplete data in
+  // the range are ignored so a half-finished month doesn't distort the ranking.
+  const pickDefault = () => {
+    const trips = {}, seen = {};
+    allProjects.forEach(p=>{ trips[p] = {}; });
+    months.forEach(m=>{ seen[m] = new Set(); allProjects.forEach(p=>trips[p][m]=0); });
+    rows.forEach(r=>{
+      const day = parseInt(r.date.slice(8,10), 10);
+      if(day < from || day > to) return;
+      seen[r.month].add(r.date);
+      trips[r.project][r.month] += (r.trip || 0);
+    });
+    let use = months.filter(m=>seen[m].size >= expectedDays(m));
+    if(use.length < 2) use = months;
+    return allProjects
+      .map(p=>{ const v = use.map(m=>trips[p][m]); return { p, spread: Math.max(...v)-Math.min(...v), total: v.reduce((a,b)=>a+b,0) }; })
+      .sort((x,y)=> y.spread - x.spread || y.total - x.total)
+      .slice(0, 3).map(x=>x.p);
+  };
+
+  let selected;
+  if(momState.selected === 'auto'){
+    selected = months.length ? pickDefault() : [];
+  } else {
+    selected = allProjects.filter(p=>momState.selected.has(p));
+  }
+  momState.current = new Set(selected);
+
   const menu = document.getElementById('momProjectMenu');
   const keepScroll = menu.scrollTop;
   menu.innerHTML =
-    '<div class="mom-multi-actions"><button type="button" data-act="all">Select all</button><button type="button" data-act="none">Clear</button></div>' +
-    allProjects.map(p=>`<label class="mom-multi-item"><input type="checkbox" data-project="${wowEsc(p)}" ${selected.includes(p)?'checked':''}><span>${wowEsc(p)}</span></label>`).join('');
+    '<div class="mom-multi-actions"><button type="button" data-act="auto">Default (top 3)</button><button type="button" data-act="all">All Projects</button><button type="button" data-act="none">Clear</button></div>' +
+    allProjects.map(p=>`<label class="mom-multi-item"><input type="checkbox" data-project="${wowEsc(p)}" ${selected.includes(p)?'checked':''}><span>${wowEsc(p)}</span><button type="button" class="mom-only" data-only="${wowEsc(p)}" title="Show this project only">Only</button></label>`).join('');
   menu.scrollTop = keepScroll;
   document.querySelector('#momProjectBtn span').textContent =
-    !momState.selected ? 'All Projects'
+    momState.selected === 'auto' ? `Default (${selected.length} projects)`
+    : selected.length === allProjects.length && allProjects.length ? 'All Projects'
     : selected.length === 0 ? 'No project selected'
     : selected.length <= 2 ? selected.join(', ')
     : `${selected.length} projects selected`;
@@ -2778,7 +2815,6 @@ function renderMonthComparison(){
   document.getElementById('momDesc').textContent =
     `${M.label} for ${rangeText} of each month, compared month by month`;
 
-  const months = [...new Set(rows.map(r=>r.month).filter(Boolean))].sort();
   if(!months.length || !selected.length){
     chartEl.innerHTML = `<div style="color:var(--slate-light);font-size:12px;padding:20px 0;">${!selected.length ? 'Select at least one project' : 'No data'}</div>`;
     tableEl.innerHTML = ''; noteEl.innerHTML = ''; return;
@@ -2844,11 +2880,6 @@ function renderMonthComparison(){
   chartEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${grid}${bars}${xl}</svg><div class="compare-chart-legend">${legend}</div>`;
 
   // ----- table with change vs previous month -----
-  const expectedDays = m => {
-    const [y, mo] = m.split('-').map(Number);
-    const dim = new Date(y, mo, 0).getDate();
-    return Math.max(0, Math.min(to, dim) - from + 1);
-  };
   const delta = (cur, prev) => {
     if(prev === undefined) return '';
     const diff = cur - prev;
