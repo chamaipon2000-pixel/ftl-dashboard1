@@ -963,6 +963,10 @@
           <button data-metric="trip" class="active">Trips</button>
           <button data-metric="box">Boxes</button>
         </div>
+        <div class="seg trend-seg" id="momDimToggle">
+          <button data-dim="project" class="active">By Project</button>
+          <button data-dim="zone">By Region</button>
+        </div>
       </div>
       <div id="momChart"></div>
       <div id="momTable" style="overflow-x:auto;"></div>
@@ -2681,7 +2685,7 @@ const MOM_METRICS = {
   trip:  { label: 'Trips',  unit: 'trips',  val: r => r.trip || 0 },
   box:   { label: 'Boxes',  unit: 'boxes',  val: r => r.box || 0 }
 };
-const momState = { from: 1, to: null, metric: 'trip', group: 'month', selected: 'auto', monthsSel: 'all', ready: false };
+const momState = { from: 1, to: null, metric: 'trip', group: 'month', dim: 'project', selected: 'auto', monthsSel: 'all', ready: false };
 
 function momSetup(){
   if(momState.ready) return;
@@ -2702,6 +2706,10 @@ function momSetup(){
   document.getElementById('momMetricToggle').addEventListener('click', e=>{
     const b = e.target.closest('button'); if(!b) return;
     momState.metric = b.dataset.metric; renderMonthComparison();
+  });
+  document.getElementById('momDimToggle').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    momState.dim = b.dataset.dim; renderMonthComparison();
   });
   const wrap = document.getElementById('momProjectWrap');
   const mwrap = document.getElementById('momMonthWrap');
@@ -2842,32 +2850,51 @@ function renderMonthComparison(){
     : months.length <= 2 ? months.map(fmtMonth).join(', ')
     : `${months.length} months selected`;
 
+  document.querySelectorAll('#momDimToggle button').forEach(b=>b.classList.toggle('active', b.dataset.dim === momState.dim));
+  const byRegion = momState.dim === 'zone';
   const M = MOM_METRICS[metric];
   const rangeText = from === to ? `day ${from}` : `day ${from}–${to}`;
   document.getElementById('momDesc').textContent =
-    `${M.label} for ${rangeText} of each month, comparing the months you select`;
+    byRegion ? `${M.label} by region for ${rangeText} of each month — for the projects selected, which regions carry the most work and how each changed vs the previous month`
+      : `${M.label} for ${rangeText} of each month, comparing the months you select`;
 
   if(!months.length || !selected.length){
     chartEl.innerHTML = `<div style="color:var(--slate-light);font-size:12px;padding:20px 0;">${!months.length && allMonths.length ? 'Select at least one month' : !selected.length ? 'Select at least one project' : 'No data'}</div>`;
     tableEl.innerHTML = ''; noteEl.innerHTML = ''; return;
   }
 
-  // values[project][month], plus which dates actually have data in the range
-  const values = {}; selected.forEach(p=>{ values[p] = {}; months.forEach(m=>values[p][m]=0); });
+  // values[item][month]; item = project, or region (zone) when "By Region" is on.
+  // Region mode still only counts the projects ticked in the project picker.
+  const selSet = new Set(selected);
+  const regionOf = r => ZONE_ORDER.includes(r.zone) ? r.zone : 'Unspecified';
+  let items = selected;
+  if(byRegion){
+    const present = new Set();
+    rows.forEach(r=>{ if(selSet.has(r.project)) present.add(regionOf(r)); });
+    items = ZONE_ORDER.concat(['Unspecified']).filter(z=>present.has(z));
+  }
+  const values = {}; items.forEach(p=>{ values[p] = {}; months.forEach(m=>values[p][m]=0); });
   const datesWithData = {}; months.forEach(m=>datesWithData[m] = new Set());
   rows.forEach(r=>{
     const day = parseInt(r.date.slice(8,10), 10);
     if(day < from || day > to || !datesWithData[r.month]) return;
     datesWithData[r.month].add(r.date);
-    if(values[r.project]) values[r.project][r.month] += M.val(r);
+    if(byRegion && !selSet.has(r.project)) return;
+    const key = byRegion ? regionOf(r) : r.project;
+    if(values[key]) values[key][r.month] += M.val(r);
   });
-  const totals = {}; months.forEach(m=>totals[m] = selected.reduce((s,p)=>s+values[p][m],0));
+  if(byRegion) items = items.filter(z=>months.some(m=>values[z][m] > 0));
+  if(!items.length){
+    chartEl.innerHTML = `<div style="color:var(--slate-light);font-size:12px;padding:20px 0;">No data</div>`;
+    tableEl.innerHTML = ''; noteEl.innerHTML = ''; return;
+  }
+  const totals = {}; months.forEach(m=>totals[m] = items.reduce((s,p)=>s+values[p][m],0));
 
   // ----- chart (grouped bars) -----
   const byProject = group === 'project';
-  const groups = byProject ? selected : months;
-  const series = byProject ? months : selected;
-  const colorOf = (i) => byProject ? MOM_MONTH_COLORS[i % MOM_MONTH_COLORS.length] : PROJECT_COMPARE_COLORS[i % PROJECT_COMPARE_COLORS.length];
+  const groups = byProject ? items : months;
+  const series = byProject ? months : items;
+  const colorOf = (i) => byProject ? MOM_MONTH_COLORS[i % MOM_MONTH_COLORS.length] : (byRegion ? (ZONE_COLORS[series[i]] || '#94A3B8') : PROJECT_COMPARE_COLORS[i % PROJECT_COMPARE_COLORS.length]);
   const valueOf = (g, sIdx) => byProject ? values[g][series[sIdx]] : values[series[sIdx]][g];
   const groupLabel = g => byProject ? g : fmtMonth(g);
   const seriesLabel = x => byProject ? fmtMonth(x) : x;
@@ -2930,10 +2957,28 @@ function renderMonthComparison(){
     const pct = totals[prev] ? ` (${(Math.abs(diff)/totals[prev]*100).toFixed(1)}%)` : '';
     return `<div>${fmtMonth(m)} vs ${fmtMonth(prev)}: ${word}${diff ? pct : ''} — ${totals[prev].toLocaleString()} → ${totals[m].toLocaleString()}</div>`;
   }).join('');
+  // region mode: which region is biggest each month, and what rose / dropped the most
+  let insights = '';
+  if(byRegion){
+    const lines = months.map((m,i)=>{
+      const top = items.slice().sort((a,b)=>values[b][m]-values[a][m])[0];
+      const share = totals[m] ? `, ${(values[top][m]/totals[m]*100).toFixed(0)}% of total` : '';
+      let t = `<b>${fmtMonth(m)}</b>: most ${M.unit} in <b>${wowEsc(top)}</b> (${values[top][m].toLocaleString()}${share})`;
+      if(i){
+        const prev = months[i-1];
+        const ch = items.map(z=>({z, d: values[z][m]-values[z][prev]})).filter(x=>x.d !== 0);
+        const up = ch.slice().sort((a,b)=>b.d-a.d)[0], dn = ch.slice().sort((a,b)=>a.d-b.d)[0];
+        if(up && up.d > 0) t += ` · biggest rise <b style="color:var(--green)">${wowEsc(up.z)} +${up.d.toLocaleString()}</b>`;
+        if(dn && dn.d < 0) t += ` · biggest drop <b style="color:var(--red)">${wowEsc(dn.z)} −${Math.abs(dn.d).toLocaleString()}</b>`;
+      }
+      return `<div>${t}</div>`;
+    }).join('');
+    insights = `<div style="font-size:13px;color:var(--slate);margin-top:10px;line-height:1.7;">${lines}</div>`;
+  }
   const head = months.map(m=>`<th>${fmtMonth(m)}<span class="mom-th-sub">${datesWithData[m].size}/${expectedDays(m)} days with data</span></th>`).join('');
-  const bodyRows = selected.map(p=>`<tr><td>${wowEsc(p)}</td>${months.map((m,i)=>`<td>${values[p][m].toLocaleString()}${delta(values[p][m], i ? values[p][months[i-1]] : undefined)}</td>`).join('')}</tr>`).join('');
+  const bodyRows = items.map(p=>`<tr><td>${wowEsc(p)}</td>${months.map((m,i)=>`<td>${values[p][m].toLocaleString()}${delta(values[p][m], i ? values[p][months[i-1]] : undefined)}</td>`).join('')}</tr>`).join('');
   const totalRow = `<tr class="mom-total"><td>Total</td>${months.map((m,i)=>`<td>${totals[m].toLocaleString()}${delta(totals[m], i ? totals[months[i-1]] : undefined)}</td>`).join('')}</tr>`;
-  tableEl.innerHTML = (summary ? `<div style="font-size:13px;color:var(--slate);margin-top:14px;line-height:1.7;">${summary}</div>` : '') + `<table class="mom-table"><thead><tr><th>Project</th>${head}</tr></thead><tbody>${bodyRows}${totalRow}</tbody></table>`;
+  tableEl.innerHTML = (insights ? `<div style="font-size:12px;font-weight:700;color:var(--ink);margin-top:14px;">Region highlights</div>${insights}` : '') + (summary ? `<div style="font-size:13px;color:var(--slate);margin-top:14px;line-height:1.7;">${summary}</div>` : '') + `<table class="mom-table"><thead><tr><th>${byRegion ? 'Region' : 'Project'}</th>${head}</tr></thead><tbody>${bodyRows}${totalRow}</tbody></table>`;
 
   const partial = months.filter(m => datesWithData[m].size < expectedDays(m));
   noteEl.innerHTML = partial.length
