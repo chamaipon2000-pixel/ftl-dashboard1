@@ -2010,7 +2010,7 @@ function renderUtilBars(rows){
 }
 
 // ---------- Trip Volume trend panel (Daily / Week / Month toggle) ----------
-let tripTrendState = { mode: 'day', month: null };
+let tripTrendState = { mode: 'day', month: null, monthManual: false };
 
 function fmtWeekLabel(mondayDate){
   const monEnd = new Date(mondayDate);
@@ -2054,16 +2054,25 @@ function fmtExcelWeekLabel(year, week){
   return mo1 === mo2 ? `${d1}-${d2} ${mo1}` : `${d1} ${mo1} - ${d2} ${mo2}`;
 }
 
+// Current calendar month as 'YYYY-MM' (local time of the device viewing the page)
+function currentMonthKey(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+// Months in the data, plus the current month even if it has no rows yet
 function tripTrendMonths(){
-  return [...new Set(DATA.map(d=>d.month).filter(Boolean))].sort();
+  return [...new Set(DATA.map(d=>d.month).filter(Boolean).concat(currentMonthKey()))].sort();
 }
 
 function populateTripTrendMonthSelect(){
   const sel = document.getElementById('tripTrendMonthSelect');
   const months = tripTrendMonths();
   if(!months.length){ sel.innerHTML = ''; return; }
-  if(!tripTrendState.month || !months.includes(tripTrendState.month)){
-    tripTrendState.month = months[months.length - 1];
+  // Always follow the current month, unless the user picked another month from the dropdown
+  if(!tripTrendState.monthManual || !months.includes(tripTrendState.month)){
+    tripTrendState.month = currentMonthKey();
+    tripTrendState.monthManual = false;
   }
   sel.innerHTML = months.map(m=>`<option value="${m}">${fmtMonth(m)}</option>`).join('');
   sel.value = tripTrendState.month;
@@ -2173,6 +2182,7 @@ document.getElementById('tripTrendModeToggle').addEventListener('click', (e)=>{
 });
 document.getElementById('tripTrendMonthSelect').addEventListener('change', (e)=>{
   tripTrendState.month = e.target.value;
+  tripTrendState.monthManual = (e.target.value !== currentMonthKey());
   renderTripTrendPanel();
 });
 
