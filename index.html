@@ -2561,7 +2561,7 @@ function renderTable(rows){
 // Compares the selected week with the week before it (Sun–Sat, same WEEKNUM
 // convention as the weekly charts). Follows the Project / Sub-contractor
 // filters but ignores the Daily/Monthly period so it always sees whole weeks.
-const wowState = { key: null };
+const wowState = { key: null, manual: false };
 function wowEsc(v){ return String(v).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function wowWeekRange(year, week){
   const start = excelWeekStart(year, week);
@@ -2582,6 +2582,16 @@ function renderWeekOverWeek(){
   const lastDate = DATA.reduce((m,r)=> (r.date && r.date > m) ? r.date : m, '');
   const weekMap = {}; // "year-week" -> {year, week}
   rows.forEach(r=>{ const w = excelWeekNum(r.date); weekMap[`${w.year}-${w.week}`] = w; });
+  // Always offer the current week (Sun–Sat containing today) and the week before it,
+  // even if the data has no rows for them yet, so the panel can open on "this week".
+  const pad2 = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
+  const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+  const weekAgoStr = `${weekAgo.getFullYear()}-${pad2(weekAgo.getMonth()+1)}-${pad2(weekAgo.getDate())}`;
+  const curWk = excelWeekNum(todayStr), prevWk = excelWeekNum(weekAgoStr);
+  [prevWk, curWk].forEach(w=>{ weekMap[`${w.year}-${w.week}`] = w; });
+  const currentWeekKey = `${curWk.year}-${curWk.week}`;
   const keys = Object.keys(weekMap).sort((a,b)=> (weekMap[a].year-weekMap[b].year) || (weekMap[a].week-weekMap[b].week));
   // a week is "partial" until its Saturday has passed in the data
   const isPartial = k => wowWeekRange(weekMap[k].year, weekMap[k].week).end > lastDate;
@@ -2592,10 +2602,12 @@ function renderWeekOverWeek(){
     tbl.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">Need at least two weeks of data to compare</div>';
     return;
   }
-  if(!wowState.key || !selectable.includes(wowState.key)){
-    const complete = selectable.filter(k=>!isPartial(k));
-    wowState.key = (complete.length ? complete : selectable).slice(-1)[0];
+  // Default to the current week; keep a different week only if the user picked it
+  if(!wowState.manual || !selectable.includes(wowState.key)){
+    wowState.key = selectable.includes(currentWeekKey) ? currentWeekKey : selectable.slice(-1)[0];
+    wowState.manual = false;
   }
+  wowState.currentKey = currentWeekKey;
   sel.innerHTML = selectable.slice().reverse().map(k=>{
     const w = weekMap[k];
     return `<option value="${k}">Week ${w.week} (${fmtExcelWeekLabel(w.year, w.week)})${isPartial(k) ? ' – partial' : ''}</option>`;
@@ -2682,6 +2694,7 @@ function renderWeekOverWeek(){
 }
 document.getElementById('wowWeekSelect').addEventListener('change', e=>{
   wowState.key = e.target.value;
+  wowState.manual = (e.target.value !== wowState.currentKey);
   renderWeekOverWeek();
 });
 
