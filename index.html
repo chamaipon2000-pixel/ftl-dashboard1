@@ -969,22 +969,6 @@
 
   <div class="panels panels-1">
     <div class="panel">
-      <div class="trend-panel-header" style="margin-bottom:10px;">
-        <div>
-          <div class="panel-title">Week-over-Week by Project</div>
-          <div class="panel-desc" id="wowDesc">Trips per project compared with the previous week (Sun&ndash;Sat, matching Excel's WEEKNUM)</div>
-        </div>
-        <div class="trend-controls">
-          <select id="wowWeekSelect" class="trend-month-select"></select>
-        </div>
-      </div>
-      <div id="wowSummary" style="font-size:13px;color:var(--slate);margin-bottom:12px;"></div>
-      <div id="wowTable" style="overflow-x:auto;"></div>
-    </div>
-  </div>
-
-  <div class="panels panels-1">
-    <div class="panel">
       <div class="panel-title">Week vs Week — Compare Any Two Weeks</div>
       <div class="panel-desc" id="wcDesc">Pick two weeks to see what changed — by project and by day of the week</div>
       <div class="wc-controls">
@@ -2609,11 +2593,7 @@ function renderTable(rows){
 }
 
 // ---------- Master render ----------
-// ---------- Week-over-Week by Project ----------
-// Compares the selected week with the week before it (Sun–Sat, same WEEKNUM
-// convention as the weekly charts). Follows the Project / Sub-contractor
-// filters but ignores the Daily/Monthly period so it always sees whole weeks.
-const wowState = { key: null, manual: false };
+// ---------- Week helpers (shared by the Week vs Week panel) ----------
 function wowEsc(v){ return String(v).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function wowWeekRange(year, week){
   const start = excelWeekStart(year, week);
@@ -2621,157 +2601,26 @@ function wowWeekRange(year, week){
   const iso = d => d.toISOString().slice(0,10);
   return { start: iso(start), end: iso(end) };
 }
-function renderWeekOverWeek(){
-  const sel = document.getElementById('wowWeekSelect');
-  const tbl = document.getElementById('wowTable');
-  const sum = document.getElementById('wowSummary');
-  const rows = getEntityFiltered().filter(r=>r.date && r.project);
-  if(!rows.length){
-    sel.innerHTML = ''; sum.textContent = '';
-    tbl.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data for the selected filters</div>';
-    return;
-  }
-  const lastDate = DATA.reduce((m,r)=> (r.date && r.date > m) ? r.date : m, '');
-  const weekMap = {}; // "year-week" -> {year, week}
-  rows.forEach(r=>{ const w = excelWeekNum(r.date); weekMap[`${w.year}-${w.week}`] = w; });
-  // Always offer the current week (Sun–Sat containing today) and the week before it,
-  // even if the data has no rows for them yet, so the panel can open on "this week".
-  const pad2 = n => String(n).padStart(2, '0');
-  const now = new Date();
-  const todayStr = `${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
-  const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-  const weekAgoStr = `${weekAgo.getFullYear()}-${pad2(weekAgo.getMonth()+1)}-${pad2(weekAgo.getDate())}`;
-  const curWk = excelWeekNum(todayStr), prevWk = excelWeekNum(weekAgoStr);
-  [prevWk, curWk].forEach(w=>{ weekMap[`${w.year}-${w.week}`] = w; });
-  const currentWeekKey = `${curWk.year}-${curWk.week}`;
-  const keys = Object.keys(weekMap).sort((a,b)=> (weekMap[a].year-weekMap[b].year) || (weekMap[a].week-weekMap[b].week));
-  // a week is "partial" until its Saturday has passed in the data
-  const isPartial = k => wowWeekRange(weekMap[k].year, weekMap[k].week).end > lastDate;
-  // only weeks that have a previous week in the data can be compared
-  const selectable = keys.slice(1);
-  if(!selectable.length){
-    sel.innerHTML = ''; sum.textContent = '';
-    tbl.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">Need at least two weeks of data to compare</div>';
-    return;
-  }
-  // Default to the current week; keep a different week only if the user picked it
-  if(!wowState.manual || !selectable.includes(wowState.key)){
-    wowState.key = selectable.includes(currentWeekKey) ? currentWeekKey : selectable.slice(-1)[0];
-    wowState.manual = false;
-  }
-  wowState.currentKey = currentWeekKey;
-  sel.innerHTML = selectable.slice().reverse().map(k=>{
-    const w = weekMap[k];
-    return `<option value="${k}">Week ${w.week} (${fmtExcelWeekLabel(w.year, w.week)})${isPartial(k) ? ' – partial' : ''}</option>`;
-  }).join('');
-  sel.value = wowState.key;
-
-  const cur = weekMap[wowState.key];
-  const prevKey = keys[keys.indexOf(wowState.key) - 1];
-  const prev = weekMap[prevKey];
-
-  // project name is merged case-insensitively (e.g. "PIZZA HUT" / "Pizza Hut")
-  const agg = {}; // lowerName -> {label, labelTrips, cur, prev}
-  const plates = { cur: new Set(), prev: new Set() };
-  rows.forEach(r=>{
-    const w = excelWeekNum(r.date); const k = `${w.year}-${w.week}`;
-    if(k !== wowState.key && k !== prevKey) return;
-    const side = (k === wowState.key) ? 'cur' : 'prev';
-    const id = String(r.project).trim().toLowerCase();
-    const a = agg[id] || (agg[id] = { label: r.project, variants:{}, cur:0, prev:0 });
-    a.variants[r.project] = (a.variants[r.project] || 0) + (r.trip || 0);
-    a[side] += (r.trip || 0);
-    if(r.plate) plates[side].add(String(r.plate).replace(/[\s-]/g,''));
-  });
-  const list = Object.values(agg).map(a=>{
-    a.label = Object.entries(a.variants).sort((x,y)=>y[1]-x[1])[0][0];
-    a.diff = a.cur - a.prev;
-    a.pct = a.prev ? (a.diff / a.prev * 100) : null;
-    return a;
-  }).sort((a,b)=> (b.diff - a.diff) || (b.cur - a.cur));
-
-  const totCur = list.reduce((s,a)=>s+a.cur,0), totPrev = list.reduce((s,a)=>s+a.prev,0);
-  const gains = list.filter(a=>a.diff>0).reduce((s,a)=>s+a.diff,0);
-  const losses = list.filter(a=>a.diff<0).reduce((s,a)=>s+a.diff,0);
-  const totDiff = totCur - totPrev;
-  const totPct = totPrev ? (totDiff/totPrev*100) : null;
-  const GREEN = '#16A34A', RED = '#E5484D';
-  const col = v => v > 0 ? GREEN : (v < 0 ? RED : 'var(--slate)');
-  const sgn = v => v > 0 ? `+${v}` : `${v}`;
-  const pctTxt = p => p === null ? 'new' : `${p > 0 ? '+' : ''}${p.toFixed(1)}%`;
-
-  document.getElementById('wowDesc').textContent =
-    `Week ${cur.week} (${fmtExcelWeekLabel(cur.year, cur.week)}) vs Week ${prev.week} (${fmtExcelWeekLabel(prev.year, prev.week)}) · trips per project, Sun–Sat`;
-  const partialNote = isPartial(wowState.key) ? ' <span style="color:#B45309;">(this week is still in progress)</span>' : '';
-  sum.innerHTML =
-    `Total trips <b style="color:var(--ink)">${totCur}</b> vs ${totPrev} → <b style="color:${col(totDiff)}">${sgn(totDiff)}${totPct===null?'':` (${pctTxt(totPct)})`}</b>` +
-    ` &middot; gains <b style="color:${GREEN}">+${gains}</b> / losses <b style="color:${RED}">${losses}</b>` +
-    ` &middot; unique vehicles <b style="color:var(--ink)">${plates.cur.size}</b> vs ${plates.prev.size} (${sgn(plates.cur.size - plates.prev.size)})` + partialNote;
-
-  const maxAbs = Math.max(1, ...list.map(a=>Math.abs(a.diff)));
-  tbl.innerHTML = `
-    <table style="min-width:620px;">
-      <thead><tr>
-        <th>Project</th>
-        <th style="text-align:right">Week ${prev.week}</th>
-        <th style="text-align:right">Week ${cur.week}</th>
-        <th style="text-align:right">Change</th>
-        <th style="text-align:right">% Change</th>
-        <th style="width:26%">Contribution to change</th>
-      </tr></thead>
-      <tbody>
-        ${list.map(a=>{
-          const w = Math.round(Math.abs(a.diff)/maxAbs*100);
-          return `<tr>
-            <td>${wowEsc(a.label)}</td>
-            <td class="mono" style="text-align:right">${a.prev}</td>
-            <td class="mono" style="text-align:right">${a.cur}</td>
-            <td class="mono" style="text-align:right;font-weight:700;color:${col(a.diff)}">${a.diff===0?'0':sgn(a.diff)}</td>
-            <td class="mono" style="text-align:right;color:${col(a.diff)}">${a.diff===0?'0.0%':pctTxt(a.pct)}</td>
-            <td><div style="height:10px;border-radius:5px;background:var(--paper);position:relative;">
-              <div style="position:absolute;top:0;height:100%;border-radius:5px;width:${w}%;background:${col(a.diff)};${a.diff<0?'right:0;':'left:0;'}opacity:${a.diff===0?0:1};"></div>
-            </div></td>
-          </tr>`;
-        }).join('')}
-        <tr style="font-weight:700;background:var(--paper);">
-          <td>Total</td>
-          <td class="mono" style="text-align:right">${totPrev}</td>
-          <td class="mono" style="text-align:right">${totCur}</td>
-          <td class="mono" style="text-align:right;color:${col(totDiff)}">${totDiff===0?'0':sgn(totDiff)}</td>
-          <td class="mono" style="text-align:right;color:${col(totDiff)}">${totPct===null?'—':pctTxt(totPct)}</td>
-          <td></td>
-        </tr>
-      </tbody>
-    </table>`;
-}
-document.getElementById('wowWeekSelect').addEventListener('change', e=>{
-  wowState.key = e.target.value;
-  wowState.manual = (e.target.value !== wowState.currentKey);
-  renderWeekOverWeek();
-});
 
 // ---------- Week vs Week: compare any two weeks ----------
 const WC_METRICS = {
   trip: { label: 'Trips', unit: 'trips', val: r => r.trip || 0 },
   box:  { label: 'Boxes', unit: 'boxes', val: r => r.box || 0 }
 };
-const wcState = { a: null, b: null, manual: false, metric: 'trip', showAll: false, ready: false };
+const wcState = { a: null, b: null, manual: false, metric: 'trip', ready: false };
 const WC_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 function wcSetup(){
   if(wcState.ready) return;
   wcState.ready = true;
-  document.getElementById('wcWeekA').addEventListener('change', e=>{ wcState.a = e.target.value; wcState.manual = true; wcState.showAll = false; renderWeekCompare(); });
-  document.getElementById('wcWeekB').addEventListener('change', e=>{ wcState.b = e.target.value; wcState.manual = true; wcState.showAll = false; renderWeekCompare(); });
+  document.getElementById('wcWeekA').addEventListener('change', e=>{ wcState.a = e.target.value; wcState.manual = true; renderWeekCompare(); });
+  document.getElementById('wcWeekB').addEventListener('change', e=>{ wcState.b = e.target.value; wcState.manual = true; renderWeekCompare(); });
   document.getElementById('wcSwap').addEventListener('click', ()=>{
     const t = wcState.a; wcState.a = wcState.b; wcState.b = t; wcState.manual = true; renderWeekCompare();
   });
   document.getElementById('wcMetricToggle').addEventListener('click', e=>{
     const b = e.target.closest('button'); if(!b) return;
     wcState.metric = b.dataset.metric; renderWeekCompare();
-  });
-  document.getElementById('wcTable').addEventListener('click', e=>{
-    if(e.target.closest('[data-wc-more]')){ wcState.showAll = !wcState.showAll; renderWeekCompare(); }
   });
 }
 
@@ -2816,6 +2665,7 @@ function renderWeekCompare(){
   // ---- aggregate (project names merged case-insensitively, like the Week-over-Week table) ----
   const agg = {};
   const dowA = [0,0,0,0,0,0,0], dowB = [0,0,0,0,0,0,0];
+  const plates = { a: new Set(), b: new Set() };
   rows.forEach(r=>{
     const w = excelWeekNum(r.date), k = `${w.year}-${w.week}`;
     if(k !== A && k !== B) return;
@@ -2824,8 +2674,9 @@ function renderWeekCompare(){
     const lk = r.project.trim().toLowerCase();
     const a = agg[lk] || (agg[lk] = { label: r.project, labelN: {}, a: 0, b: 0 });
     a.labelN[r.project] = (a.labelN[r.project] || 0) + 1;
-    if(k === A){ a.a += v; dowA[dow] += v; }
-    if(k === B){ a.b += v; dowB[dow] += v; }
+    const pl = r.plate ? String(r.plate).replace(/[\s-]/g,'') : '';
+    if(k === A){ a.a += v; dowA[dow] += v; if(pl) plates.a.add(pl); }
+    if(k === B){ a.b += v; dowB[dow] += v; if(pl) plates.b.add(pl); }
   });
   const list = Object.values(agg).map(o=>{
     o.label = Object.entries(o.labelN).sort((x,y)=>y[1]-x[1])[0][0];
@@ -2873,9 +2724,10 @@ function renderWeekCompare(){
     <div class="compare-chart-legend"><div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:#94A3B8"></span>${wkA}</div><div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:#2F80ED"></span>${wkB}</div></div>`;
 
   // ---- project table with diverging change bars ----
-  const sorted = list.slice().sort((x,y)=> Math.abs(y.diff) - Math.abs(x.diff) || (y.a+y.b) - (x.a+x.b));
-  const LIMIT = 15;
-  const shown = wcState.showAll ? sorted : sorted.slice(0, LIMIT);
+  // Same order as the old Week-over-Week table: biggest increases first, then no change,
+  // then the decreases (largest drop last) — gains and losses are kept apart, not mixed.
+  const sorted = list.slice().sort((x,y)=> (y.diff - x.diff) || (y.b - x.b));
+  const shown = sorted;
   const maxAbs = Math.max(1, ...sorted.map(o=>Math.abs(o.diff)));
   const rowHtml = o=>{
     const cls = o.diff > 0 ? 'wc-pos' : o.diff < 0 ? 'wc-neg' : 'wc-zero';
@@ -2887,21 +2739,20 @@ function renderWeekCompare(){
       <td class="wc-bar-cell"><div class="wc-bar">${o.diff ? `<i class="${o.diff>0?'up':'down'}" style="width:${wPct}%"></i>` : ''}</div></td>
       <td class="${cls}">${o.diff ? sgn(o.diff) : '0'}</td><td class="${cls}">${pcText}</td></tr>`;
   };
-  const moreBtn = sorted.length > LIMIT
-    ? `<button type="button" class="wc-more" data-wc-more>${wcState.showAll ? 'Show top ' + LIMIT + ' only' : 'Show all ' + sorted.length + ' projects'}</button>` : '';
   const tot = `<tr class="wc-total"><td>Total</td><td>${totA.toLocaleString()}</td><td>${totB.toLocaleString()}</td><td class="wc-bar-cell"></td><td class="${totD>0?'wc-pos':totD<0?'wc-neg':''}">${totD ? sgn(totD) : '0'}</td><td class="${totD>0?'wc-pos':totD<0?'wc-neg':''}">${totPct === null ? '–' : (totPct>0?'+':totPct<0?'−':'') + Math.abs(totPct).toFixed(1) + '%'}</td></tr>`;
 
-  const topUp = up.slice().sort((x,y)=>y.diff-x.diff)[0], topDown = down.slice().sort((x,y)=>x.diff-y.diff)[0];
-  const insight = [
-    topUp ? `biggest rise <b class="wc-pos">${wowEsc(topUp.label)} ${sgn(topUp.diff)}</b>` : '',
-    topDown ? `biggest drop <b class="wc-neg">${wowEsc(topDown.label)} ${sgn(topDown.diff)}</b>` : ''
-  ].filter(Boolean).join(' · ');
+  const gainsSum = list.filter(o=>o.diff>0).reduce((x,o)=>x+o.diff,0);
+  const lossSum  = list.filter(o=>o.diff<0).reduce((x,o)=>x+o.diff,0);
+  const vehDiff = plates.b.size - plates.a.size;
+  const insight = `Total ${M.unit} <b style="color:var(--ink)">${totB.toLocaleString()}</b> vs ${totA.toLocaleString()} → <b class="${totD>0?'wc-pos':totD<0?'wc-neg':''}">${totD ? sgn(totD) : '0'}${totPct===null?'':` (${(totPct>0?'+':totPct<0?'−':'') + Math.abs(totPct).toFixed(1)}%)`}</b>` +
+    ` &middot; gains <b class="wc-pos">+${gainsSum.toLocaleString()}</b> / losses <b class="wc-neg">−${Math.abs(lossSum).toLocaleString()}</b>` +
+    ` &middot; unique vehicles <b style="color:var(--ink)">${plates.b.size}</b> vs ${plates.a.size} (${vehDiff>0?'+':vehDiff<0?'−':''}${Math.abs(vehDiff)})`;
 
   const partialNote = [A,B].filter(isPartial).map(k=>`Week ${weekMap[k].week}`);
   tblEl.innerHTML = `<div class="wc-section">By project — what changed (${wkB} vs ${wkA})</div>
     ${insight ? `<div style="font-size:13px;color:var(--slate);margin-bottom:8px;">${insight}</div>` : ''}
     <table class="wc-table"><thead><tr><th>Project</th><th>${wkA}</th><th>${wkB}</th><th style="text-align:center">Change (◀ lower · higher ▶)</th><th>Δ ${M.unit}</th><th>Δ %</th></tr></thead>
-    <tbody>${shown.map(rowHtml).join('')}${tot}</tbody></table>${moreBtn}
+    <tbody>${shown.map(rowHtml).join('')}${tot}</tbody></table>
     ${partialNote.length ? `<div class="mom-note">⚠ ${partialNote.join(' and ')} ${partialNote.length > 1 ? 'are' : 'is'} still in progress — comparisons with a full week will look lower.</div>` : ''}`;
 }
 
@@ -3198,7 +3049,6 @@ function render(){
   renderCostByProjectBars(rows);
   renderProjectWeeklyComparison();
   renderMonthComparison();
-  renderWeekOverWeek();
   renderWeekCompare();
   renderSubcontractorBars(rows);
   renderUtilBars(rows);
