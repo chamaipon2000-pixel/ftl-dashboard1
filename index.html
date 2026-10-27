@@ -972,6 +972,7 @@
       <div class="panel-title">Week vs Week — Compare Any Two Weeks</div>
       <div class="panel-desc" id="wcDesc">Pick two weeks to see what changed — by project and by day of the week</div>
       <div class="wc-controls">
+        <div class="mom-multi" id="wcProjectWrap"><button type="button" id="wcProjectBtn" class="trend-month-select mom-multi-btn"><span>All Projects</span></button><div class="mom-multi-menu" id="wcProjectMenu"></div></div>
         <span class="wc-tag" style="background:#94A3B8"></span><select id="wcWeekA" class="trend-month-select"></select>
         <span class="wc-vs">vs</span>
         <span class="wc-tag" style="background:#2F80ED"></span><select id="wcWeekB" class="trend-month-select"></select>
@@ -2607,7 +2608,7 @@ const WC_METRICS = {
   trip: { label: 'Trips', unit: 'trips', val: r => r.trip || 0 },
   box:  { label: 'Boxes', unit: 'boxes', val: r => r.box || 0 }
 };
-const wcState = { a: null, b: null, manual: false, metric: 'trip', ready: false };
+const wcState = { a: null, b: null, manual: false, metric: 'trip', selected: null, allKeys: [], ready: false };
 const WC_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 function wcSetup(){
@@ -2617,6 +2618,24 @@ function wcSetup(){
   document.getElementById('wcWeekB').addEventListener('change', e=>{ wcState.b = e.target.value; wcState.manual = true; renderWeekCompare(); });
   document.getElementById('wcSwap').addEventListener('click', ()=>{
     const t = wcState.a; wcState.a = wcState.b; wcState.b = t; wcState.manual = true; renderWeekCompare();
+  });
+  const pw = document.getElementById('wcProjectWrap');
+  document.getElementById('wcProjectBtn').addEventListener('click', e=>{ e.stopPropagation(); pw.classList.toggle('open'); });
+  document.addEventListener('click', e=>{ if(!pw.contains(e.target)) pw.classList.remove('open'); });
+  document.addEventListener('keydown', e=>{ if(e.key === 'Escape') pw.classList.remove('open'); });
+  document.getElementById('wcProjectMenu').addEventListener('click', e=>{
+    e.stopPropagation();
+    const only = e.target.closest('button[data-only]');
+    if(only){ e.preventDefault(); wcState.selected = new Set([only.dataset.only]); pw.classList.remove('open'); renderWeekCompare(); return; }
+    const act = e.target.closest('button[data-act]');
+    if(act){ wcState.selected = act.dataset.act === 'all' ? null : new Set(); renderWeekCompare(); return; }
+    const cb = e.target.closest('input[data-project]');
+    if(!cb) return;
+    const all = wcState.allKeys;
+    const cur = new Set(wcState.selected || all);
+    cb.checked ? cur.add(cb.dataset.project) : cur.delete(cb.dataset.project);
+    wcState.selected = cur.size === all.length ? null : cur;
+    renderWeekCompare();
   });
   document.getElementById('wcMetricToggle').addEventListener('click', e=>{
     const b = e.target.closest('button'); if(!b) return;
@@ -2634,6 +2653,29 @@ function renderWeekCompare(){
   const empty = msg => { selA.innerHTML = ''; selB.innerHTML = ''; cardsEl.innerHTML = ''; dowEl.innerHTML = '';
     tblEl.innerHTML = `<div style="color:var(--slate-light);font-size:12px;">${msg}</div>`; };
   if(!rows.length){ empty('No data for the selected filters'); return; }
+
+  // Project picker (names merged case-insensitively, like the table)
+  const projLabel = {};
+  { const cnt = {};
+    rows.forEach(r=>{ const lk = r.project.trim().toLowerCase(); (cnt[lk] = cnt[lk] || {})[r.project] = ((cnt[lk][r.project]) || 0) + 1; });
+    Object.keys(cnt).forEach(lk=>{ projLabel[lk] = Object.entries(cnt[lk]).sort((x,y)=>y[1]-x[1])[0][0]; }); }
+  const allKeys = Object.keys(projLabel).sort((x,y)=>projLabel[x].localeCompare(projLabel[y]));
+  wcState.allKeys = allKeys;
+  if(wcState.selected){
+    wcState.selected = new Set([...wcState.selected].filter(k=>allKeys.includes(k)));
+    if(wcState.selected.size === allKeys.length) wcState.selected = null;
+  }
+  const selSet = wcState.selected;
+  {
+    const menu = document.getElementById('wcProjectMenu'), keep = menu.scrollTop;
+    menu.innerHTML =
+      '<div class="mom-multi-actions"><button type="button" data-act="all">All Projects</button><button type="button" data-act="none">Clear</button></div>' +
+      allKeys.map(k=>`<label class="mom-multi-item"><input type="checkbox" data-project="${wowEsc(k)}" ${(!selSet || selSet.has(k)) ? 'checked' : ''}><span>${wowEsc(projLabel[k])}</span><button type="button" class="mom-only" data-only="${wowEsc(k)}" title="Show this project only">Only</button></label>`).join('');
+    menu.scrollTop = keep;
+    const names = selSet ? allKeys.filter(k=>selSet.has(k)).map(k=>projLabel[k]) : [];
+    document.querySelector('#wcProjectBtn span').textContent =
+      !selSet ? 'All Projects' : names.length === 0 ? 'No project selected' : names.length <= 2 ? names.join(', ') : `${names.length} projects selected`;
+  }
 
   const lastDate = DATA.reduce((m,r)=> (r.date && r.date > m) ? r.date : m, '');
   const weekMap = {};
@@ -2672,12 +2714,18 @@ function renderWeekCompare(){
     const v = M.val(r);
     const dow = new Date(r.date + 'T00:00:00Z').getUTCDay();
     const lk = r.project.trim().toLowerCase();
+    if(selSet && !selSet.has(lk)) return;
     const a = agg[lk] || (agg[lk] = { label: r.project, labelN: {}, a: 0, b: 0 });
     a.labelN[r.project] = (a.labelN[r.project] || 0) + 1;
     const pl = r.plate ? String(r.plate).replace(/[\s-]/g,'') : '';
     if(k === A){ a.a += v; dowA[dow] += v; if(pl) plates.a.add(pl); }
     if(k === B){ a.b += v; dowB[dow] += v; if(pl) plates.b.add(pl); }
   });
+  if(selSet && selSet.size === 0){
+    cardsEl.innerHTML = ''; dowEl.innerHTML = '';
+    tblEl.innerHTML = '<div style="color:var(--slate-light);font-size:12px;padding:12px 0;">Select at least one project</div>';
+    return;
+  }
   const list = Object.values(agg).map(o=>{
     o.label = Object.entries(o.labelN).sort((x,y)=>y[1]-x[1])[0][0];
     o.diff = o.b - o.a;
