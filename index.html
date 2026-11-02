@@ -954,6 +954,7 @@
           <button data-mode="month">Month</button>
         </div>
         <select id="tripTrendMonthSelect" class="trend-month-select"></select>
+        <div class="mom-field">Day <select id="tripTrendFrom" class="trend-month-select"></select> to <select id="tripTrendTo" class="trend-month-select"></select></div>
       </div>
     </div>
     <div id="tripTrendChart" class="trend-chart"></div>
@@ -1220,7 +1221,7 @@ const GOOGLE_SHEET_ID = '1kLF2mj_kc3gVoiOTyfuLMo0bcYP5B3ef';
 // rather than the working "Aug 2026" / "Sep 2026" tabs directly, so that a
 // Basic Filter someone applies on the working tab to eyeball data never
 // hides rows from the dashboard — the mirror always reflects every row.
-const GOOGLE_SHEET_TABS = ['Aug 2026 (raw)','Sep 2026 (raw)','Oct 2026 (raw)'];
+const GOOGLE_SHEET_TABS = ['Aug 2026 (raw)','Sep 2026 (raw)','Oct 2026 (raw)','Nov 2026 (raw)'];
 const AUTO_REFRESH_MS = 3 * 60 * 1000; // 3 minutes
 
 // ---------- State ----------
@@ -2047,7 +2048,38 @@ function renderUtilBars(rows){
 }
 
 // ---------- Trip Volume trend panel (Daily / Week / Month toggle) ----------
-let tripTrendState = { mode: 'day', month: null, monthManual: false };
+let tripTrendState = { mode: 'day', month: null, monthManual: false, dayFrom: 1, dayTo: 31 };
+
+// Keep only rows whose day-of-month falls inside the selected Day range
+// (applies to every month at once, same idea as Month-over-Month).
+function tripTrendDayFilter(rows){
+  const { dayFrom, dayTo } = tripTrendState;
+  if(dayFrom <= 1 && dayTo >= 31) return rows;
+  return rows.filter(r=>{
+    const d = +String(r.date).split('-')[2];
+    return d >= dayFrom && d <= dayTo;
+  });
+}
+function tripTrendDayLabel(){
+  const { dayFrom, dayTo } = tripTrendState;
+  return (dayFrom <= 1 && dayTo >= 31) ? '' : `day ${dayFrom}\u2013${dayTo}`;
+}
+function setupTripTrendDaySelects(){
+  const f = document.getElementById('tripTrendFrom'), t = document.getElementById('tripTrendTo');
+  if(f.options.length) return;
+  const opts = Array.from({length:31}, (_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');
+  f.innerHTML = opts; t.innerHTML = opts;
+  f.addEventListener('change', e=>{
+    tripTrendState.dayFrom = +e.target.value;
+    if(tripTrendState.dayTo < tripTrendState.dayFrom) tripTrendState.dayTo = tripTrendState.dayFrom;
+    renderTripTrendPanel();
+  });
+  t.addEventListener('change', e=>{
+    tripTrendState.dayTo = +e.target.value;
+    if(tripTrendState.dayFrom > tripTrendState.dayTo) tripTrendState.dayFrom = tripTrendState.dayTo;
+    renderTripTrendPanel();
+  });
+}
 
 function fmtWeekLabel(mondayDate){
   const monEnd = new Date(mondayDate);
@@ -2135,6 +2167,10 @@ function renderTrendBars(elId, entries){
 
 function renderTripTrendPanel(){
   populateTripTrendMonthSelect();
+  setupTripTrendDaySelects();
+  document.getElementById('tripTrendFrom').value = tripTrendState.dayFrom;
+  document.getElementById('tripTrendTo').value = tripTrendState.dayTo;
+  const dayLbl = tripTrendDayLabel();
 
   const modeToggle = document.getElementById('tripTrendModeToggle');
   modeToggle.querySelectorAll('button').forEach(btn=>{
@@ -2149,8 +2185,8 @@ function renderTripTrendPanel(){
 
   if(tripTrendState.mode === 'day'){
     titleEl.textContent = 'Trip Volume — Daily';
-    descEl.textContent = `Total trips per day for ${monthLabel}`;
-    const rows = getEntityFiltered().filter(r=>r.month === tripTrendState.month);
+    descEl.textContent = `Total trips per day for ${monthLabel}` + (dayLbl ? `, ${dayLbl}` : '');
+    const rows = tripTrendDayFilter(getEntityFiltered()).filter(r=>r.month === tripTrendState.month);
     const map = {};
     rows.forEach(r=>{ if(r.date) map[r.date] = (map[r.date]||0) + (r.trip||0); });
     const dates = Object.keys(map).sort();
@@ -2167,8 +2203,8 @@ function renderTripTrendPanel(){
     // Spans the whole dataset (not just one month) — every week that has at
     // least one trip shows up here, in year+week order, regardless of which
     // month(s) it falls in.
-    descEl.textContent = `Total trips per week (Sun\u2013Sat, matching Excel's WEEKNUM), across all months`;
-    const rows = getEntityFiltered();
+    descEl.textContent = `Total trips per week (Sun\u2013Sat, matching Excel's WEEKNUM), across all months` + (dayLbl ? ` \u00b7 counting only ${dayLbl} of each month` : '');
+    const rows = tripTrendDayFilter(getEntityFiltered());
     const map = {}; // "year-week" -> total trips
     const weekInfo = {}; // "year-week" -> {year, week}
     rows.forEach(r=>{
@@ -2196,8 +2232,8 @@ function renderTripTrendPanel(){
 
   } else {
     titleEl.textContent = 'Trip Volume — Monthly';
-    descEl.textContent = 'Total trips per month across the full dataset';
-    const rows = getEntityFiltered();
+    descEl.textContent = dayLbl ? `Total trips for ${dayLbl} of each month` : 'Total trips per month across the full dataset';
+    const rows = tripTrendDayFilter(getEntityFiltered());
     const map = {};
     rows.forEach(r=>{ if(r.month) map[r.month] = (map[r.month]||0) + (r.trip||0); });
     const months = Object.keys(map).sort();
