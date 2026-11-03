@@ -978,6 +978,9 @@
     <div class="panel">
       <div class="panel-title">Trip Volume by Project — Weekly</div>
       <div class="panel-desc">Trips per week (Sun–Sat, matching Excel's WEEKNUM), compared across projects, spanning the full dataset</div>
+      <div class="mom-controls">
+        <div class="mom-multi" id="pwProjectWrap"><button type="button" id="pwProjectBtn" class="trend-month-select mom-multi-btn"><span>All Projects</span></button><div class="mom-multi-menu" id="pwProjectMenu"></div></div>
+      </div>
       <div class="panel-body" id="projectWeeklyCompareChart"></div>
     </div>
   </div>
@@ -1878,13 +1881,71 @@ function renderCostByProjectBars(rows){
 // ---------- Render Trip Volume by Project — Weekly comparison chart ----------
 const PROJECT_COMPARE_COLORS = ['#7C5CFC', '#E8863A', '#2E9E6D', '#D64545', '#2F80ED', '#C2A833', '#8E44AD', '#16A3B8', '#EA4C89', '#556B2F'];
 
+// Project picker state: 'all' = every project (default, follows new data), otherwise a Set of chosen names.
+const pwState = { selected: 'all', allProjects: [], current: new Set(), ready: false };
+
+function pwSetup(){
+  if(pwState.ready) return;
+  pwState.ready = true;
+  const wrap = document.getElementById('pwProjectWrap');
+  document.getElementById('pwProjectBtn').addEventListener('click', e=>{ e.stopPropagation(); wrap.classList.toggle('open'); });
+  document.addEventListener('click', e=>{ if(!wrap.contains(e.target)) wrap.classList.remove('open'); });
+  document.addEventListener('keydown', e=>{ if(e.key === 'Escape') wrap.classList.remove('open'); });
+  document.getElementById('pwProjectMenu').addEventListener('click', e=>{
+    e.stopPropagation();
+    const only = e.target.closest('button[data-only]');
+    if(only){ e.preventDefault(); pwState.selected = new Set([only.dataset.only]); wrap.classList.remove('open'); renderProjectWeeklyComparison(); return; }
+    const act = e.target.closest('button[data-act]');
+    if(act){
+      pwState.selected = act.dataset.act === 'all' ? 'all'
+                       : act.dataset.act === 'none' ? new Set() : new Set(pwState.top5 || []);
+      renderProjectWeeklyComparison(); return;
+    }
+    const cb = e.target.closest('input[data-project]');
+    if(!cb) return;
+    const cur = new Set(pwState.current);
+    cb.checked ? cur.add(cb.dataset.project) : cur.delete(cb.dataset.project);
+    pwState.selected = cur;
+    renderProjectWeeklyComparison();
+  });
+}
+
 function renderProjectWeeklyComparison(){
+  pwSetup();
   const el = document.getElementById('projectWeeklyCompareChart');
   // Same Project/Sub-contractor filters as Trip Volume — Weekly, and likewise
   // spans the whole dataset (every week that has data), not just one month,
   // so trends across projects can be compared over the full period on file.
   const rows = getEntityFiltered();
-  const projects = [...new Set(rows.map(r=>r.project).filter(Boolean))].sort();
+  const allProjects = [...new Set(rows.map(r=>r.project).filter(Boolean))].sort();
+  pwState.allProjects = allProjects;
+  // Each project keeps the same colour no matter which ones are selected.
+  const colorOfProject = p => PROJECT_COMPARE_COLORS[allProjects.indexOf(p) % PROJECT_COMPARE_COLORS.length];
+
+  const grandTotals = {};
+  rows.forEach(r=>{ if(r.project) grandTotals[r.project] = (grandTotals[r.project]||0) + (r.trip||0); });
+  pwState.top5 = allProjects.slice().sort((a,b)=> (grandTotals[b]||0) - (grandTotals[a]||0)).slice(0,5);
+  let projects;
+  if(pwState.selected === 'all'){
+    projects = allProjects.slice();
+  } else {
+    projects = allProjects.filter(p=>pwState.selected.has(p));
+  }
+  pwState.current = new Set(projects);
+
+  // Picker menu + button label
+  const menu = document.getElementById('pwProjectMenu');
+  const keep = menu.scrollTop;
+  menu.innerHTML =
+    '<div class="mom-multi-actions"><button type="button" data-act="all">All Projects</button><button type="button" data-act="top5">Top 5</button><button type="button" data-act="none">Clear</button></div>' +
+    allProjects.map(p=>`<label class="mom-multi-item"><input type="checkbox" data-project="${wowEsc(p)}" ${projects.includes(p)?'checked':''}><span style="display:flex;align-items:center;gap:8px;"><i class="compare-chart-legend-swatch" style="background:${colorOfProject(p)}"></i>${wowEsc(p)}</span><button type="button" class="mom-only" data-only="${wowEsc(p)}" title="Show this project only">Only</button></label>`).join('');
+  menu.scrollTop = keep;
+  document.querySelector('#pwProjectBtn span').textContent =
+    pwState.selected === 'all' ? 'All Projects'
+    : projects.length === allProjects.length && allProjects.length ? 'All Projects'
+    : projects.length === 0 ? 'No project selected'
+    : projects.length <= 2 ? projects.join(', ')
+    : `${projects.length} projects selected`;
 
   const weekInfo = {}; // "year-week" -> {year, week}
   const projectTotals = {}; // project -> "year-week" -> total trips
@@ -1901,8 +1962,12 @@ function renderProjectWeeklyComparison(){
     return (wa.year - wb.year) || (wa.week - wb.week);
   });
 
-  if(!weekKeys.length || !projects.length){
+  if(!weekKeys.length || !allProjects.length){
     el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data for the selected filters</div>';
+    return;
+  }
+  if(!projects.length){
+    el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;padding:20px 0;">Select at least one project</div>';
     return;
   }
 
@@ -1936,8 +2001,8 @@ function renderProjectWeeklyComparison(){
     return `<text x="${xFor(i)}" y="${H - padBottom + 16}" text-anchor="middle" font-size="10" fill="var(--slate-light)">W${weekInfo[k].week}</text>`;
   }).join('');
 
-  const lines = projects.map((p, pi)=>{
-    const color = PROJECT_COMPARE_COLORS[pi % PROJECT_COMPARE_COLORS.length];
+  const lines = projects.map((p)=>{
+    const color = colorOfProject(p);
     const pointList = weekKeys.map((k,i)=>{
       const v = (projectTotals[p] && projectTotals[p][k]) || 0;
       return { cx: xFor(i), cy: yFor(v), week: weekInfo[k].week, value: v };
@@ -1964,8 +2029,9 @@ function renderProjectWeeklyComparison(){
 
   const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${gridLines}${lines}${xLabels}</svg>`;
 
-  const legend = projects.map((p,pi)=>{
-    const color = PROJECT_COMPARE_COLORS[pi % PROJECT_COMPARE_COLORS.length];
+  // Legend lists only the projects currently selected, so it stays short.
+  const legend = projects.map((p)=>{
+    const color = colorOfProject(p);
     return `<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${color}"></span>${p}</div>`;
   }).join('');
 
