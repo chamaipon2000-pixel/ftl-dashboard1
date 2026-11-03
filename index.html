@@ -716,10 +716,12 @@
   .wc-badge.stop{ background:#FBE5E5; color:var(--red); }
   .wc-more{ margin-top:12px; border:1px solid var(--line); background:var(--paper); border-radius:8px; padding:7px 14px; font-size:12.5px; font-weight:600; color:var(--slate); cursor:pointer; font-family:inherit; }
   .wc-more:hover{ border-color:var(--navy-deep); color:var(--navy-deep); }
-  .wc-drill{ display:flex; flex-wrap:wrap; gap:16px; margin-top:8px; }
-  .wc-dcard{ flex:1 1 460px; min-width:0; border:1px solid var(--line); border-radius:12px; padding:14px 16px; background:var(--card); }
+  .wc-drill{ display:flex; flex-direction:column; gap:12px; margin-top:8px; }
+  .wc-dcard{ flex:none; min-width:0; border:1px solid var(--line); border-radius:12px; padding:14px 16px; background:var(--card); }
   .wc-dcard .wc-section{ margin-top:0; }
-  .wc-scroll{ max-height:380px; overflow:auto; }
+  .wc-scroll{ max-height:420px; overflow:auto; }
+  .wc-compact .wc-bar-cell{ width:34%; min-width:140px; }
+  .wc-compact tr.wc-other td{ color:var(--slate); font-weight:500; }
   .wc-scroll .wc-table thead th{ position:sticky; top:0; background:var(--card); z-index:1; }
   .wc-scroll .wc-table tfoot td{ position:sticky; bottom:0; font-weight:700; background:var(--paper); border-bottom:none; }
   .wc-table th[data-dow]{ text-align:center; cursor:pointer; }
@@ -2656,7 +2658,7 @@ const WC_METRICS = {
   trip: { label: 'Trips', unit: 'trips', val: r => r.trip || 0 },
   box:  { label: 'Boxes', unit: 'boxes', val: r => r.box || 0 }
 };
-const wcState = { a: null, b: null, manual: false, metric: 'trip', selected: null, allKeys: [], ready: false, dow: null };
+const wcState = { a: null, b: null, manual: false, metric: 'trip', selected: null, allKeys: [], ready: false, dow: null, dayAll: false, hmOpen: false };
 const WC_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 function wcSetup(){
@@ -2692,14 +2694,16 @@ function wcSetup(){
   // Click a day (bar column or heatmap cell) to drill into which projects drove its change.
   const dowHost = document.getElementById('wcDow');
   dowHost.addEventListener('click', e=>{
-    if(e.target.closest('[data-dow-auto]')){ wcState.dow = null; renderWeekCompare(); return; }
+    const tg = e.target.closest('[data-toggle]');
+    if(tg){ if(tg.dataset.toggle === 'dayAll') wcState.dayAll = !wcState.dayAll; else wcState.hmOpen = !wcState.hmOpen; renderWeekCompare(); return; }
+    if(e.target.closest('[data-dow-auto]')){ wcState.dow = null; wcState.dayAll = false; renderWeekCompare(); return; }
     const t = e.target.closest('[data-dow]'); if(!t) return;
-    wcState.dow = +t.dataset.dow; renderWeekCompare();
+    wcState.dow = +t.dataset.dow; wcState.dayAll = false; renderWeekCompare();
   });
   dowHost.addEventListener('keydown', e=>{
     if(e.key !== 'Enter' && e.key !== ' ') return;
     const t = e.target.closest('[data-dow]'); if(!t) return;
-    e.preventDefault(); wcState.dow = +t.dataset.dow; renderWeekCompare();
+    e.preventDefault(); wcState.dow = +t.dataset.dow; wcState.dayAll = false; renderWeekCompare();
   });
 }
 
@@ -2838,56 +2842,72 @@ function renderWeekCompare(){
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${hl}${grid}${bars}${ov}</svg>
     <div class="compare-chart-legend"><div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:#94A3B8"></span>${wkA}</div><div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:#2F80ED"></span>${wkB}</div></div>`;
 
-  // ---- day drill-down: which projects drove the change on the selected weekday ----
+  // ---- day drill-down: headline + top contributors (heatmap is opt-in) ----
   const dayDate = (k, i) => { const d = new Date(wowWeekRange(weekMap[k].year, weekMap[k].week).start + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0,10); };
   const dateA = dayDate(A, selDow), dateB = dayDate(B, selDow);
   const dayA = dowA[selDow], dayB = dowB[selDow], dayD = dayB - dayA;
-  const dayRows = list.map(o=>({ label:o.label, a:o.da[selDow], b:o.db[selDow], diff:o.db[selDow] - o.da[selDow] }))
-    .filter(o=>o.a || o.b).sort((x,y)=> (y.diff - x.diff) || (y.b - x.b));
-  const dMax = Math.max(1, ...dayRows.map(o=>Math.abs(o.diff)));
+  const allRows = list.map(o=>({ label:o.label, a:o.da[selDow], b:o.db[selDow], diff:o.db[selDow] - o.da[selDow] })).filter(o=>o.a || o.b);
+  const changed = allRows.filter(o=>o.diff !== 0).sort((x,y)=> (Math.abs(y.diff) - Math.abs(x.diff)) || x.label.localeCompare(y.label));
+  const TOP_N = 5;
+  const shownRows = wcState.dayAll ? changed : changed.slice(0, TOP_N);
+  const restRows = wcState.dayAll ? [] : changed.slice(TOP_N);
+  const dMax = Math.max(1, ...changed.map(o=>Math.abs(o.diff)));
   const dayRowHtml = o=>{
-    const cls = o.diff > 0 ? 'wc-pos' : o.diff < 0 ? 'wc-neg' : 'wc-zero';
+    const cls = o.diff > 0 ? 'wc-pos' : 'wc-neg';
     const badge = !o.a && o.b ? '<span class="wc-badge new">NEW</span>' : (o.a && !o.b ? '<span class="wc-badge stop">NONE</span>' : '');
-    const share = dayD ? Math.round(o.diff / dayD * 100) : null;
     return `<tr><td>${wowEsc(o.label)}${badge}</td><td>${o.a.toLocaleString()}</td><td>${o.b.toLocaleString()}</td>
-      <td class="wc-bar-cell"><div class="wc-bar">${o.diff ? `<i class="${o.diff>0?'up':'down'}" style="width:${Math.abs(o.diff)/dMax*50}%"></i>` : ''}</div></td>
-      <td class="${cls}">${o.diff ? sgn(o.diff) : '0'}</td><td class="${cls}">${share === null ? '–' : (share<0?'−':'') + Math.abs(share) + '%'}</td></tr>`;
+      <td class="wc-bar-cell"><div class="wc-bar"><i class="${o.diff>0?'up':'down'}" style="width:${Math.abs(o.diff)/dMax*50}%"></i></div></td>
+      <td class="${cls}">${sgn(o.diff)}</td></tr>`;
   };
+  let otherRow = '';
+  if(restRows.length){
+    const ra = restRows.reduce((x,o)=>x+o.a,0), rb = restRows.reduce((x,o)=>x+o.b,0), rd = rb - ra;
+    otherRow = `<tr class="wc-other"><td>${restRows.length} other project${restRows.length>1?'s':''} (small changes)</td><td>${ra.toLocaleString()}</td><td>${rb.toLocaleString()}</td><td class="wc-bar-cell"></td><td class="${rd>0?'wc-pos':rd<0?'wc-neg':''}">${rd ? sgn(rd) : '0'}</td></tr>`;
+  }
+  const unchangedN = allRows.length - changed.length;
   let dayInsight;
   if(dayD === 0){
-    const g = dayRows.filter(o=>o.diff>0).reduce((x,o)=>x+o.diff,0), l = dayRows.filter(o=>o.diff<0).reduce((x,o)=>x+o.diff,0);
-    dayInsight = g || l ? `No net change · gains <b class="wc-pos">+${g.toLocaleString()}</b> offset by losses <b class="wc-neg">−${Math.abs(l).toLocaleString()}</b>` : 'No change on this day';
+    const g = changed.filter(o=>o.diff>0).reduce((x,o)=>x+o.diff,0), l = changed.filter(o=>o.diff<0).reduce((x,o)=>x+o.diff,0);
+    dayInsight = g || l ? `No net change — gains <b class="wc-pos">+${g.toLocaleString()}</b> offset by losses <b class="wc-neg">−${Math.abs(l).toLocaleString()}</b>` : 'No change on this day';
   } else {
-    const pool = dayRows.filter(o=> dayD > 0 ? o.diff > 0 : o.diff < 0).sort((x,y)=> dayD > 0 ? y.diff - x.diff : x.diff - y.diff);
+    const pool = changed.filter(o=> dayD > 0 ? o.diff > 0 : o.diff < 0).sort((x,y)=> dayD > 0 ? y.diff - x.diff : x.diff - y.diff);
     let acc = 0; const pick = [];
     for(const o of pool){ pick.push(o); acc += o.diff; if(acc / dayD >= 0.7 || pick.length >= 3) break; }
-    dayInsight = `${pick.map(o=>wowEsc(o.label)).join(', ')} ${pick.length > 1 ? 'account' : 'accounts'} for <b class="${dayD>0?'wc-pos':'wc-neg'}">${sgn(acc)}</b> of ${sgn(dayD)} (${Math.round(acc / dayD * 100)}% of the net change)`;
+    dayInsight = `${pick.map(o=>`<b>${wowEsc(o.label)}</b> ${sgn(o.diff)}`).join(', ')} — ${Math.round(acc / dayD * 100)}% of the change`;
   }
   const noData = [dateA, dateB].filter(d=>d > lastDate).map(fmtDateShort);
-  const dayTotRow = `<tr class="wc-total"><td>Total</td><td>${dayA.toLocaleString()}</td><td>${dayB.toLocaleString()}</td><td class="wc-bar-cell"></td><td class="${dayD>0?'wc-pos':dayD<0?'wc-neg':''}">${dayD ? sgn(dayD) : '0'}</td><td></td></tr>`;
+  const dayTotRow = `<tr class="wc-total"><td>Total</td><td>${dayA.toLocaleString()}</td><td>${dayB.toLocaleString()}</td><td class="wc-bar-cell"></td><td class="${dayD>0?'wc-pos':dayD<0?'wc-neg':''}">${dayD ? sgn(dayD) : '0'}</td></tr>`;
+  const toggleBtn = changed.length > TOP_N ? `<button type="button" class="wc-more" data-toggle="dayAll">${wcState.dayAll ? 'Show top ' + TOP_N + ' only' : `Show all ${changed.length} changed projects`}</button>` : '';
 
-  // ---- project × day heatmap (change per project per weekday) ----
-  const hmRows = list.map(o=>({ label:o.label, cells:o.db.map((v,i)=> v - o.da[i]), tot:o.diff })).filter(o=>o.cells.some(c=>c))
-    .sort((x,y)=> (y.tot - x.tot) || x.label.localeCompare(y.label));
-  const hmMax = Math.max(1, ...hmRows.flatMap(o=>o.cells.map(Math.abs)));
-  const hmCls = v => { if(!v) return ''; const r = Math.abs(v) / hmMax; return (v>0?'p':'n') + (r >= 0.5 ? 3 : r >= 0.2 ? 2 : 1); };
-  const hmCell = (v,i) => `<td class="wc-hm ${hmCls(v)}${i===selDow?' sel':''}" data-dow="${i}">${v ? sgn(v) : '·'}</td>`;
-  const hmHead = WC_DOW.map((d,i)=>`<th data-dow="${i}" class="${i===selDow?'wc-hm-sel':''}">${d}</th>`).join('');
-  const hmBody = hmRows.map(o=>`<tr><td>${wowEsc(o.label)}</td>${o.cells.map(hmCell).join('')}<td class="${o.tot>0?'wc-pos':o.tot<0?'wc-neg':'wc-zero'}">${o.tot ? sgn(o.tot) : '0'}</td></tr>`).join('');
-  const hmFoot = `<tr><td>Total</td>${dd.map((v,i)=>`<td class="${v>0?'wc-pos':v<0?'wc-neg':''}" style="text-align:center">${v ? sgn(v) : '0'}</td>`).join('')}<td class="${totD>0?'wc-pos':totD<0?'wc-neg':''}">${totD ? sgn(totD) : '0'}</td></tr>`;
-  const hiddenN = list.length - hmRows.length;
+  // ---- project × day heatmap (opt-in) ----
+  let hmHtml = '';
+  if(wcState.hmOpen){
+    const hmRows = list.map(o=>({ label:o.label, cells:o.db.map((v,i)=> v - o.da[i]), tot:o.diff })).filter(o=>o.cells.some(c=>c))
+      .sort((x,y)=> (y.tot - x.tot) || x.label.localeCompare(y.label));
+    const hmMax = Math.max(1, ...hmRows.flatMap(o=>o.cells.map(Math.abs)));
+    const hmCls = v => { if(!v) return ''; const r = Math.abs(v) / hmMax; return (v>0?'p':'n') + (r >= 0.5 ? 3 : r >= 0.2 ? 2 : 1); };
+    const hmCell = (v,i) => `<td class="wc-hm ${hmCls(v)}${i===selDow?' sel':''}" data-dow="${i}">${v ? sgn(v) : '·'}</td>`;
+    const hmHead = WC_DOW.map((d,i)=>`<th data-dow="${i}" class="${i===selDow?'wc-hm-sel':''}">${d}</th>`).join('');
+    const hmBody = hmRows.map(o=>`<tr><td>${wowEsc(o.label)}</td>${o.cells.map(hmCell).join('')}<td class="${o.tot>0?'wc-pos':o.tot<0?'wc-neg':'wc-zero'}">${o.tot ? sgn(o.tot) : '0'}</td></tr>`).join('');
+    const hmFoot = `<tr><td>Total</td>${dd.map((v,i)=>`<td class="${v>0?'wc-pos':v<0?'wc-neg':''}" style="text-align:center">${v ? sgn(v) : '0'}</td>`).join('')}<td class="${totD>0?'wc-pos':totD<0?'wc-neg':''}">${totD ? sgn(totD) : '0'}</td></tr>`;
+    const hiddenN = list.length - hmRows.length;
+    hmHtml = `<div style="font-size:12.5px;color:var(--slate);margin:10px 0 8px;">${wkB} − ${wkA} per weekday · click a cell to open that day${hiddenN > 0 ? ` · ${hiddenN} unchanged project${hiddenN>1?'s':''} hidden` : ''}</div>
+      <div class="wc-scroll"><table class="wc-table"><thead><tr><th>Project</th>${hmHead}<th>Week</th></tr></thead><tbody>${hmBody}</tbody><tfoot>${hmFoot}</tfoot></table></div>`;
+  }
 
   dowEl.insertAdjacentHTML('beforeend', `<div class="wc-drill">
     <div class="wc-dcard">
-      <div class="wc-section">${WC_DOW[selDow]} — which projects drove ${sgn(dayD)}? ${wcState.dow !== null ? '<button type="button" class="wc-more" data-dow-auto="1" style="margin:0 0 0 8px;padding:3px 10px;">Show biggest change</button>' : ''}</div>
-      <div style="font-size:12.5px;color:var(--slate);margin-bottom:8px;">${WC_DOW[selDow]} ${fmtDateShort(dateA)} <b style="color:var(--ink)">${dayA.toLocaleString()}</b> → ${WC_DOW[selDow]} ${fmtDateShort(dateB)} <b style="color:var(--ink)">${dayB.toLocaleString()}</b> ${M.unit} · ${dayInsight}${noData.length ? ` · <span style="color:var(--red)">no data yet for ${noData.join(', ')}</span>` : ''}</div>
-      <div class="wc-scroll"><table class="wc-table"><thead><tr><th>Project</th><th>${WC_DOW[selDow]} ${fmtDateShort(dateA)}</th><th>${WC_DOW[selDow]} ${fmtDateShort(dateB)}</th><th style="text-align:center">Change (◀ lower · higher ▶)</th><th>Δ ${M.unit}</th><th>Share of Δ</th></tr></thead>
-      <tbody>${dayRows.map(dayRowHtml).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--slate-light)">No ' + M.unit + ' on this day</td></tr>'}</tbody><tfoot>${dayTotRow}</tfoot></table></div>
-    </div>
-    <div class="wc-dcard">
-      <div class="wc-section">Project × day — change in ${M.unit}</div>
-      <div style="font-size:12.5px;color:var(--slate);margin-bottom:8px;">${wkB} − ${wkA} per weekday · click any cell to drill into that day${hiddenN > 0 ? ` · ${hiddenN} unchanged project${hiddenN>1?'s':''} hidden` : ''}</div>
-      <div class="wc-scroll"><table class="wc-table"><thead><tr><th>Project</th>${hmHead}<th>Week</th></tr></thead><tbody>${hmBody}</tbody><tfoot>${hmFoot}</tfoot></table></div>
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:2px;">
+        <span style="font-size:20px;font-weight:700;color:var(--ink);">${WC_DOW[selDow]}</span>
+        <span class="wc-card-value ${dayD>0?'up':dayD<0?'down':''}" style="font-size:26px;">${dayD ? sgn(dayD) : '0'}</span>
+        <span style="font-size:13px;color:var(--slate);">${M.unit} · ${fmtDateShort(dateA)}: ${dayA.toLocaleString()} → ${fmtDateShort(dateB)}: ${dayB.toLocaleString()}</span>
+        ${wcState.dow !== null ? '<button type="button" class="wc-more" data-dow-auto="1" style="margin:0 0 0 auto;padding:3px 10px;">Show biggest change</button>' : ''}
+      </div>
+      <div style="font-size:14px;color:var(--ink);margin-bottom:10px;">${dayInsight}${noData.length ? ` · <span style="color:var(--red)">no data yet for ${noData.join(', ')}</span>` : ''}</div>
+      <table class="wc-table wc-compact"><thead><tr><th>Project</th><th>${fmtDateShort(dateA)}</th><th>${fmtDateShort(dateB)}</th><th style="text-align:center">◀ lower · higher ▶</th><th>Δ ${M.unit}</th></tr></thead>
+      <tbody>${shownRows.map(dayRowHtml).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--slate-light)">No change on this day</td></tr>'}${otherRow}${dayTotRow}</tbody></table>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px;">${toggleBtn}<button type="button" class="wc-more" data-toggle="hm">${wcState.hmOpen ? 'Hide' : 'Show'} week overview (project × day)</button>${unchangedN > 0 ? `<span style="font-size:12px;color:var(--slate-light);">${unchangedN} project${unchangedN>1?'s':''} with no change not shown</span>` : ''}</div>
+      ${hmHtml}
     </div>
   </div>`);
 
