@@ -2029,13 +2029,8 @@ function renderProjectWeeklyComparison(){
 
   const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${gridLines}${lines}${xLabels}</svg>`;
 
-  // Legend lists only the projects currently selected, so it stays short.
-  const legend = projects.map((p)=>{
-    const color = colorOfProject(p);
-    return `<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${color}"></span>${p}</div>`;
-  }).join('');
-
-  el.innerHTML = `<div class="compare-chart-wrap">${svg}<div class="compare-chart-tooltip" id="compareChartTooltip"></div></div><div class="compare-chart-legend">${legend}</div>`;
+  // No legend here: projects are chosen via the picker above the chart (colours are shown in its menu).
+  el.innerHTML = `<div class="compare-chart-wrap">${svg}<div class="compare-chart-tooltip" id="compareChartTooltip"></div></div>`;
 
   // Wire up hover: show project name + trip count next to whichever point
   // the mouse is nearest, positioned with % coordinates so it lines up
