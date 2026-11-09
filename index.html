@@ -987,7 +987,7 @@
     <div class="trend-panel-header">
       <div>
         <div class="panel-title">Trip Sequence Mix — % by Trip No. (1 / 2 / 3 / 4+)</div>
-        <div class="panel-desc" id="tsDesc">Share of runs by trip number</div>
+        <div class="panel-desc" id="tsDesc">Share of runs by trip number (Nth run of the same plate on the same day)</div>
       </div>
       <div class="trend-controls">
         <div class="seg trend-seg" id="tsModeToggle">
@@ -3317,8 +3317,24 @@ const TS_BUCKETS = [
   { key:'4+', label:'Trip 4+', color:'#D64545' }
 ];
 const tsState = { mode:'day', month:null, ready:false };
+// The sheet's Trip column is 1 on every row (each row = one run), so the
+// trip number is derived instead: the Nth time the same plate runs on the
+// same date (in sheet order) is that vehicle's trip N for the day. Computed
+// over ALL data so a plate that runs for several projects is counted once.
+let tsSeqMap = new Map();
+function tsBuildSeq(){
+  tsSeqMap = new Map();
+  const counter = {};
+  DATA.forEach(r=>{
+    const plate = String(r.plate || '').replace(/[\s\-\u200B]/g,'').toLowerCase();
+    if(!plate || !r.date){ tsSeqMap.set(r, 1); return; }
+    const k = r.date + '|' + plate;
+    counter[k] = (counter[k] || 0) + 1;
+    tsSeqMap.set(r, counter[k]);
+  });
+}
 function tsBucket(r){
-  const t = Math.round(r.trip || 0);
+  const t = tsSeqMap.get(r) || 1;
   if(t >= 4) return '4+';
   if(t === 3) return '3';
   if(t === 2) return '2';
@@ -3337,6 +3353,7 @@ function tsSetup(){
 }
 function renderTripSequence(){
   tsSetup();
+  tsBuildSeq();
   const chartEl = document.getElementById('tsChart');
   const tableEl = document.getElementById('tsTable');
   const sel = document.getElementById('tsMonthSelect');
@@ -3361,8 +3378,8 @@ function renderTripSequence(){
   });
   const keys = Object.keys(groups).sort();
   document.getElementById('tsDesc').textContent = byDay
-    ? `% of runs by trip number per day — ${fmtMonth(tsState.month)} (Project / Sub-contractor filters apply)`
-    : '% of runs by trip number per month — all months (Project / Sub-contractor filters apply)';
+    ? `% of runs by trip number per day — ${fmtMonth(tsState.month)} · trip N = Nth run of the same plate that day`
+    : '% of runs by trip number per month — all months · trip N = Nth run of the same plate that day';
   if(!keys.length){ chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return; }
 
   const sum = g => g['1']+g['2']+g['3']+g['4+'];
