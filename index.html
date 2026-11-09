@@ -986,7 +986,7 @@
   <div class="trend-panel">
     <div class="trend-panel-header">
       <div>
-        <div class="panel-title">Trip Sequence Mix — % by Trip No. (1 / 2 / 3 / 4+)</div>
+        <div class="panel-title">Trip Sequence Mix — % by Trip No. (1 / 2 / 3)</div>
         <div class="panel-desc" id="tsDesc">Share of runs by trip number (Nth run of the same plate on the same day)</div>
       </div>
       <div class="trend-controls">
@@ -3313,10 +3313,10 @@ function renderMonthComparison(){
 const TS_BUCKETS = [
   { key:'1',  label:'Trip 1',  color:'#2F80ED' },
   { key:'2',  label:'Trip 2',  color:'#E8863A' },
-  { key:'3',  label:'Trip 3',  color:'#2E9E6D' },
-  { key:'4+', label:'Trip 4+', color:'#D64545' }
+  { key:'3',  label:'Trip 3',  color:'#2E9E6D' }
 ];
-const tsState = { mode:'day', month:null, ready:false };
+const tsState = { mode:'day', month:null, sel:null, ready:false };
+
 // The sheet's Trip column is 1 on every row (each row = one run), so the
 // trip number is derived instead: the Nth time the same plate runs on the
 // same date (in sheet order) is that vehicle's trip N for the day. Computed
@@ -3326,7 +3326,7 @@ function tsBuildSeq(){
   tsSeqMap = new Map();
   const counter = {};
   DATA.forEach(r=>{
-    const plate = String(r.plate || '').replace(/[\s\-\u200B]/g,'').toLowerCase();
+    const plate = String(r.plate || '').replace(/[\s\-​]/g,'').toLowerCase();
     if(!plate || !r.date){ tsSeqMap.set(r, 1); return; }
     const k = r.date + '|' + plate;
     counter[k] = (counter[k] || 0) + 1;
@@ -3335,8 +3335,7 @@ function tsBuildSeq(){
 }
 function tsBucket(r){
   const t = tsSeqMap.get(r) || 1;
-  if(t >= 4) return '4+';
-  if(t === 3) return '3';
+  if(t >= 3) return '3';
   if(t === 2) return '2';
   return '1';
 }
@@ -3345,10 +3344,18 @@ function tsSetup(){
   tsState.ready = true;
   document.getElementById('tsModeToggle').addEventListener('click', e=>{
     const b = e.target.closest('button[data-mode]'); if(!b) return;
-    tsState.mode = b.dataset.mode; renderTripSequence();
+    tsState.mode = b.dataset.mode; tsState.sel = null; renderTripSequence();
   });
   document.getElementById('tsMonthSelect').addEventListener('change', e=>{
-    tsState.month = e.target.value; renderTripSequence();
+    tsState.month = e.target.value; tsState.sel = null; renderTripSequence();
+  });
+  document.getElementById('tsChart').addEventListener('click', e=>{
+    const g = e.target.closest('[data-key]'); if(!g) return;
+    tsState.sel = g.dataset.key; renderTripSequence();
+  });
+  document.getElementById('tsTable').addEventListener('change', e=>{
+    if(e.target.id !== 'tsSelKey') return;
+    tsState.sel = e.target.value; renderTripSequence();
   });
 }
 function renderTripSequence(){
@@ -3370,54 +3377,87 @@ function renderTripSequence(){
 
   const byDay = tsState.mode === 'day';
   const rows = byDay ? rowsAll.filter(r=>r.month === tsState.month) : rowsAll;
+  const keyOf = r => byDay ? r.date : r.month;
   const groups = {};
   rows.forEach(r=>{
-    const g = byDay ? r.date : r.month;
-    if(!groups[g]) groups[g] = { '1':0,'2':0,'3':0,'4+':0 };
+    const g = keyOf(r);
+    if(!groups[g]) groups[g] = { '1':0,'2':0,'3':0 };
     groups[g][tsBucket(r)] += 1;
   });
   const keys = Object.keys(groups).sort();
   document.getElementById('tsDesc').textContent = byDay
-    ? `% of runs by trip number per day — ${fmtMonth(tsState.month)} · trip N = Nth run of the same plate that day`
-    : '% of runs by trip number per month — all months · trip N = Nth run of the same plate that day';
+    ? `% of runs by trip number per day — ${fmtMonth(tsState.month)} · trip N = Nth run of the same plate that day · click a bar to see that day's detail`
+    : '% of runs by trip number per month — all months · trip N = Nth run of the same plate that day · click a bar to see that month\'s detail';
   if(!keys.length){ chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return; }
+  // Default to the latest day/month that has data
+  if(!keys.includes(tsState.sel)) tsState.sel = keys[keys.length-1];
+  const selKey = tsState.sel;
 
-  const sum = g => g['1']+g['2']+g['3']+g['4+'];
-  const W=900, H=280, padL=44, padR=12, padT=16, padB=34;
-  const cw=W-padL-padR, ch=H-padT-padB, gw=cw/keys.length, bw=Math.min(40, gw*0.72);
-  let grid='', bars='', xl='';
+  const sum = g => g['1']+g['2']+g['3'];
+  const keyLabel = k => byDay ? fmtDate(k) : fmtMonth(k);
+
+  // ---------- chart ----------
+  const W=1000, H=400, padL=48, padR=14, padT=34, padB=46;
+  const cw=W-padL-padR, ch=H-padT-padB, gw=cw/keys.length, bw=Math.min(60, gw*0.78);
+  const fs = bw >= 40 ? 12 : bw >= 24 ? 10 : 8.5;
+  let grid='', bars='', xl='', hits='', defs='';
   [0,25,50,75,100].forEach(f=>{
     const y = padT+ch-f/100*ch;
-    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)"/><text x="${padL-6}" y="${y+4}" text-anchor="end" font-size="10" fill="var(--slate-light)" font-family="JetBrains Mono, monospace">${f}%</text>`;
+    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" ${f?'stroke-dasharray="3 4"':''}/><text x="${padL-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--slate-light)" font-family="JetBrains Mono, monospace">${f}%</text>`;
   });
   keys.forEach((k,i)=>{
     const g = groups[k], tot = sum(g) || 1;
-    const x = padL + i*gw + (gw-bw)/2;
-    let yTop = padT+ch;
+    const gx = padL + i*gw, x = gx + (gw-bw)/2, isSel = k === selKey;
+    if(isSel) bars += `<rect x="${gx+0.5}" y="4" width="${gw-1}" height="${H-8}" rx="8" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.2"/>`;
+    defs += `<clipPath id="tsc${i}"><rect x="${x}" y="${padT}" width="${bw}" height="${ch}" rx="5"/></clipPath>`;
+    let seg = '', yTop = padT+ch;
     const tip = TS_BUCKETS.map(b=>`${b.label}: ${g[b.key].toLocaleString()} (${(g[b.key]/tot*100).toFixed(1)}%)`).join(' | ');
     TS_BUCKETS.forEach(b=>{
       const h = g[b.key]/tot*ch;
       if(h <= 0) return;
       yTop -= h;
-      bars += `<rect x="${x}" y="${yTop}" width="${bw}" height="${h}" fill="${b.color}"><title>${wowEsc(byDay?fmtDate(k):fmtMonth(k))} — ${tip}</title></rect>`;
-      if(h >= 14 && bw >= 26) bars += `<text x="${x+bw/2}" y="${yTop+h/2+3}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff" font-family="JetBrains Mono, monospace">${Math.round(g[b.key]/tot*100)}%</text>`;
+      seg += `<rect x="${x}" y="${yTop}" width="${bw}" height="${h}" fill="${b.color}" stroke="#fff" stroke-width="1"/>`;
+      if(h >= fs + 3) seg += `<text x="${x+bw/2}" y="${yTop+h/2+fs*0.35}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="#fff" font-family="JetBrains Mono, monospace">${Math.round(g[b.key]/tot*100)}%</text>`;
     });
-    const lab = byDay ? k.slice(8) : fmtMonth(k);
-    if(keys.length <= 16 || i % 2 === 0) xl += `<text x="${x+bw/2}" y="${H-padB+16}" text-anchor="middle" font-size="10" fill="var(--slate)">${lab}</text>`;
+    bars += `<g clip-path="url(#tsc${i})">${seg}</g>`;
+    bars += `<text x="${x+bw/2}" y="${padT-9}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${isSel?'#1D4ED8':'var(--slate)'}" font-family="JetBrains Mono, monospace">${sum(g).toLocaleString()}</text>`;
+    const lab = byDay ? String(+k.slice(8)) : fmtMonth(k);
+    xl += `<text x="${x+bw/2}" y="${H-padB+20}" text-anchor="middle" font-size="${keys.length>20?11:12}" font-weight="${isSel?700:500}" fill="${isSel?'#1D4ED8':'var(--slate)'}">${lab}</text>`;
+    hits += `<g data-key="${k}" style="cursor:pointer"><title>${wowEsc(keyLabel(k))} — ${tip} | Total: ${sum(g).toLocaleString()}</title><rect x="${gx}" y="0" width="${gw}" height="${H}" fill="transparent"/></g>`;
   });
-  const legend = TS_BUCKETS.map(b=>`<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${b.color}"></span>${b.label}</div>`).join('');
-  chartEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${grid}${bars}${xl}</svg><div class="compare-chart-legend">${legend}</div>`;
+  const legend = TS_BUCKETS.map(b=>`<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${b.color}"></span>${b.label}</div>`).join('')
+    + `<div class="compare-chart-legend-item" style="margin-left:auto;font-weight:500;color:var(--slate-light);">Number above each bar = total runs</div>`;
+  chartEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${grid}${bars}${xl}${hits}</svg><div class="compare-chart-legend">${legend}</div>`;
 
-  // table: count and % per period, plus total row
+  // ---------- detail for the selected day / month ----------
   const pc = (n,t) => t ? (n/t*100).toFixed(1)+'%' : '–';
-  const tot = { '1':0,'2':0,'3':0,'4+':0 };
-  const body = keys.map(k=>{
-    const g = groups[k], t = sum(g);
-    TS_BUCKETS.forEach(b=>tot[b.key]+=g[b.key]);
-    return `<tr><td>${wowEsc(byDay?fmtDate(k):fmtMonth(k))}</td>${TS_BUCKETS.map(b=>`<td>${g[b.key].toLocaleString()} <span style="color:var(--slate-light)">(${pc(g[b.key],t)})</span></td>`).join('')}<td>${t.toLocaleString()}</td></tr>`;
+  const selRows = rows.filter(r=>keyOf(r) === selKey);
+  const selTot = groups[selKey], selN = sum(selTot);
+  const cards = TS_BUCKETS.map(b=>`<div class="wc-card"><div class="wc-card-label"><span class="wc-tag" style="background:${b.color}"></span>${b.label}</div><div class="wc-card-value">${pc(selTot[b.key],selN)}</div><div class="wc-card-sub">${selTot[b.key].toLocaleString()} of ${selN.toLocaleString()} runs</div></div>`).join('');
+
+  const byProj = {};
+  selRows.forEach(r=>{
+    const pj = r.project || '—';
+    if(!byProj[pj]) byProj[pj] = { '1':0,'2':0,'3':0 };
+    byProj[pj][tsBucket(r)] += 1;
+  });
+  const projList = Object.entries(byProj).sort((x,y)=> (sum(y[1]) - sum(x[1])) || x[0].localeCompare(y[0]));
+  const body = projList.map(([pj,g])=>{
+    const t = sum(g);
+    return `<tr><td>${wowEsc(pj)}</td>${TS_BUCKETS.map(b=>`<td>${g[b.key].toLocaleString()} <span style="color:var(--slate-light)">(${pc(g[b.key],t)})</span></td>`).join('')}<td>${t.toLocaleString()}</td></tr>`;
   }).join('');
-  const gt = sum(tot);
-  tableEl.innerHTML = `<table class="mom-table"><thead><tr><th>${byDay?'Date':'Month'}</th>${TS_BUCKETS.map(b=>`<th>${b.label}</th>`).join('')}<th>Total runs</th></tr></thead><tbody>${body}<tr class="mom-total"><td>Total</td>${TS_BUCKETS.map(b=>`<td>${tot[b.key].toLocaleString()} (${pc(tot[b.key],gt)})</td>`).join('')}<td>${gt.toLocaleString()}</td></tr></tbody></table>`;
+  const totRow = `<tr class="mom-total"><td>Total</td>${TS_BUCKETS.map(b=>`<td>${selTot[b.key].toLocaleString()} (${pc(selTot[b.key],selN)})</td>`).join('')}<td>${selN.toLocaleString()}</td></tr>`;
+  const selOpts = keys.slice().reverse().map(k=>`<option value="${k}" ${k===selKey?'selected':''}>${keyLabel(k)}</option>`).join('');
+
+  tableEl.innerHTML = `
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:18px 0 12px;padding-top:16px;border-top:1px solid var(--line);">
+      <div class="panel-title" style="margin:0;">Detail — ${wowEsc(keyLabel(selKey))}</div>
+      <span style="font-size:12px;color:var(--slate-light);">${selKey === keys[keys.length-1] ? 'latest ' + (byDay?'day':'month') + ' · ' : ''}pick another ${byDay?'day':'month'}:</span>
+      <select id="tsSelKey" class="trend-month-select">${selOpts}</select>
+    </div>
+    <div class="wc-cards">${cards}</div>
+    <div class="wc-section">By project</div>
+    <table class="mom-table" style="margin-top:6px;"><thead><tr><th>Project</th>${TS_BUCKETS.map(b=>`<th>${b.label}</th>`).join('')}<th>Total runs</th></tr></thead><tbody>${body}${totRow}</tbody></table>`;
 }
 
 function render(){
