@@ -967,32 +967,18 @@
   <div class="trend-panel">
     <div class="trend-panel-header">
       <div>
-        <div class="panel-title" id="tripTrendTitle">Trip Volume</div>
-        <div class="panel-desc" id="tripTrendDesc">Total trips</div>
-      </div>
-      <div class="trend-controls">
-        <div class="seg trend-seg" id="tripTrendModeToggle">
-          <button data-mode="day" class="active">Daily</button>
-          <button data-mode="week">Week</button>
-          <button data-mode="month">Month</button>
-        </div>
-        <select id="tripTrendMonthSelect" class="trend-month-select"></select>
-        <div class="mom-field">Day <select id="tripTrendFrom" class="trend-month-select"></select> to <select id="tripTrendTo" class="trend-month-select"></select></div>
-      </div>
-    </div>
-    <div id="tripTrendChart" class="trend-chart"></div>
-  </div>
-
-  <div class="trend-panel">
-    <div class="trend-panel-header">
-      <div>
-        <div class="panel-title">Trip Sequence Mix — % by Trip No. (1 / 2 / 3)</div>
+        <div class="panel-title">Trip Volume — % by Trip No. (1 / 2 / 3)</div>
         <div class="panel-desc" id="tsDesc">Share of runs by trip number (Nth run of the same plate on the same day)</div>
       </div>
       <div class="trend-controls">
         <div class="seg trend-seg" id="tsModeToggle">
           <button data-mode="day" class="active">Daily</button>
+          <button data-mode="week">Weekly</button>
           <button data-mode="month">Monthly</button>
+        </div>
+        <div class="seg trend-seg" id="tsScaleToggle" title="Volume = bar height follows total runs; 100% = every bar same height">
+          <button data-scale="abs" class="active">Volume</button>
+          <button data-scale="pct">100%</button>
         </div>
         <select id="tsMonthSelect" class="trend-month-select"></select>
       </div>
@@ -2353,17 +2339,6 @@ function renderTripTrendPanel(){
   }
 }
 
-document.getElementById('tripTrendModeToggle').addEventListener('click', (e)=>{
-  const btn = e.target.closest('button[data-mode]');
-  if(!btn) return;
-  tripTrendState.mode = btn.dataset.mode;
-  renderTripTrendPanel();
-});
-document.getElementById('tripTrendMonthSelect').addEventListener('change', (e)=>{
-  tripTrendState.month = e.target.value;
-  tripTrendState.monthManual = (e.target.value !== currentMonthKey());
-  renderTripTrendPanel();
-});
 
 
 
@@ -3315,7 +3290,7 @@ const TS_BUCKETS = [
   { key:'2',  label:'Trip 2',  color:'#E8863A' },
   { key:'3',  label:'Trip 3',  color:'#2E9E6D' }
 ];
-const tsState = { mode:'day', month:null, sel:null, ready:false };
+const tsState = { mode:'day', scale:'abs', month:null, sel:null, ready:false };
 
 // The sheet's Trip column is 1 on every row (each row = one run), so the
 // trip number is derived instead: the Nth time the same plate runs on the
@@ -3339,12 +3314,18 @@ function tsBucket(r){
   if(t === 2) return '2';
   return '1';
 }
+function tsWeekKey(date){ const w = excelWeekNum(date); return `${w.year}-${String(w.week).padStart(2,'0')}`; }
+function tsWeekLabel(k){ const [y,w] = k.split('-').map(Number); return `Week ${w} (${fmtExcelWeekLabel(y,w)})`; }
 function tsSetup(){
   if(tsState.ready) return;
   tsState.ready = true;
   document.getElementById('tsModeToggle').addEventListener('click', e=>{
     const b = e.target.closest('button[data-mode]'); if(!b) return;
     tsState.mode = b.dataset.mode; tsState.sel = null; renderTripSequence();
+  });
+  document.getElementById('tsScaleToggle').addEventListener('click', e=>{
+    const b = e.target.closest('button[data-scale]'); if(!b) return;
+    tsState.scale = b.dataset.scale; renderTripSequence();
   });
   document.getElementById('tsMonthSelect').addEventListener('change', e=>{
     tsState.month = e.target.value; tsState.sel = null; renderTripSequence();
@@ -3372,12 +3353,14 @@ function renderTripSequence(){
   if(!tsState.month || !months.includes(tsState.month)) tsState.month = months[months.length-1];
   sel.innerHTML = months.slice().reverse().map(m=>`<option value="${m}">${fmtMonth(m)}</option>`).join('');
   sel.value = tsState.month;
-  sel.hidden = tsState.mode === 'month';
+  sel.hidden = tsState.mode !== 'day';
+  document.querySelectorAll('#tsScaleToggle button').forEach(b=>b.classList.toggle('active', b.dataset.scale === tsState.scale));
   document.querySelectorAll('#tsModeToggle button').forEach(b=>b.classList.toggle('active', b.dataset.mode === tsState.mode));
 
-  const byDay = tsState.mode === 'day';
+  const byDay = tsState.mode === 'day', byWeek = tsState.mode === 'week';
+  const unit = byDay ? 'day' : byWeek ? 'week' : 'month';
   const rows = byDay ? rowsAll.filter(r=>r.month === tsState.month) : rowsAll;
-  const keyOf = r => byDay ? r.date : r.month;
+  const keyOf = r => byDay ? r.date : byWeek ? tsWeekKey(r.date) : r.month;
   const groups = {};
   rows.forEach(r=>{
     const g = keyOf(r);
@@ -3385,48 +3368,64 @@ function renderTripSequence(){
     groups[g][tsBucket(r)] += 1;
   });
   const keys = Object.keys(groups).sort();
-  document.getElementById('tsDesc').textContent = byDay
-    ? `% of runs by trip number per day — ${fmtMonth(tsState.month)} · trip N = Nth run of the same plate that day · click a bar to see that day's detail`
-    : '% of runs by trip number per month — all months · trip N = Nth run of the same plate that day · click a bar to see that month\'s detail';
+  document.getElementById('tsDesc').textContent = `Total runs and % by trip number per ${unit}` + (byDay ? ` — ${fmtMonth(tsState.month)}` : ' — all months') + ' · trip N = Nth run of the same plate that day · click a bar to see that ' + unit + "'s detail";
   if(!keys.length){ chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return; }
   // Default to the latest day/month that has data
   if(!keys.includes(tsState.sel)) tsState.sel = keys[keys.length-1];
   const selKey = tsState.sel;
 
   const sum = g => g['1']+g['2']+g['3'];
-  const keyLabel = k => byDay ? fmtDate(k) : fmtMonth(k);
+  const keyLabel = k => byDay ? fmtDate(k) : byWeek ? tsWeekLabel(k) : fmtMonth(k);
 
   // ---------- chart ----------
-  const W=1000, H=400, padL=48, padR=14, padT=34, padB=46;
-  const cw=W-padL-padR, ch=H-padT-padB, gw=cw/keys.length, bw=Math.min(60, gw*0.78);
+  // Volume mode: bar height follows the day's total runs (so busy days look
+  // taller), segments show each trip's share. 100% mode: equal-height bars.
+  const isAbs = tsState.scale === 'abs';
+  const W=1000, H=420, padL=52, padR=14, padT=38, padB=46;
+  const cw=W-padL-padR, ch=H-padT-padB, gw=cw/keys.length, bw=Math.min(64, gw*0.78);
   const fs = bw >= 40 ? 12 : bw >= 24 ? 10 : 8.5;
+  const maxTot = Math.max(1, ...keys.map(k=>sum(groups[k])));
+  let axisMax = 100;
+  if(isAbs){
+    const mag = Math.pow(10, Math.floor(Math.log10(maxTot)));
+    axisMax = ([1,1.2,1.6,2,2.4,3,4,5,6,8,10].find(m=>m*mag >= maxTot*1.08) || 10) * mag;
+  }
   let grid='', bars='', xl='', hits='', defs='';
-  [0,25,50,75,100].forEach(f=>{
-    const y = padT+ch-f/100*ch;
-    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" ${f?'stroke-dasharray="3 4"':''}/><text x="${padL-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--slate-light)" font-family="JetBrains Mono, monospace">${f}%</text>`;
+  [0,0.25,0.5,0.75,1].forEach(f=>{
+    const y = padT+ch-f*ch;
+    const lbl = isAbs ? Math.round(axisMax*f).toLocaleString() : Math.round(f*100)+'%';
+    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" ${f?'stroke-dasharray="3 4"':''}/><text x="${padL-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--slate-light)" font-family="JetBrains Mono, monospace">${lbl}</text>`;
   });
   keys.forEach((k,i)=>{
     const g = groups[k], tot = sum(g) || 1;
+    const barH = isAbs ? tot/axisMax*ch : ch;
+    const barTop = padT+ch-barH;
     const gx = padL + i*gw, x = gx + (gw-bw)/2, isSel = k === selKey;
     if(isSel) bars += `<rect x="${gx+0.5}" y="4" width="${gw-1}" height="${H-8}" rx="8" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.2"/>`;
-    defs += `<clipPath id="tsc${i}"><rect x="${x}" y="${padT}" width="${bw}" height="${ch}" rx="5"/></clipPath>`;
+    defs += `<clipPath id="tsc${i}"><rect x="${x}" y="${barTop}" width="${bw}" height="${barH}" rx="5"/></clipPath>`;
     let seg = '', yTop = padT+ch;
     const tip = TS_BUCKETS.map(b=>`${b.label}: ${g[b.key].toLocaleString()} (${(g[b.key]/tot*100).toFixed(1)}%)`).join(' | ');
     TS_BUCKETS.forEach(b=>{
-      const h = g[b.key]/tot*ch;
+      const h = g[b.key]/tot*barH;
       if(h <= 0) return;
       yTop -= h;
       seg += `<rect x="${x}" y="${yTop}" width="${bw}" height="${h}" fill="${b.color}" stroke="#fff" stroke-width="1"/>`;
-      if(h >= fs + 3) seg += `<text x="${x+bw/2}" y="${yTop+h/2+fs*0.35}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="#fff" font-family="JetBrains Mono, monospace">${Math.round(g[b.key]/tot*100)}%</text>`;
+      const pctTxt = Math.round(g[b.key]/tot*100) + '%';
+      if(h >= 2*fs + 8 && bw >= 30){
+        seg += `<text x="${x+bw/2}" y="${yTop+h/2-1}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="#fff" font-family="JetBrains Mono, monospace">${pctTxt}</text>`
+             + `<text x="${x+bw/2}" y="${yTop+h/2+fs}" text-anchor="middle" font-size="${fs-1.5}" fill="#fff" fill-opacity=".85" font-family="JetBrains Mono, monospace">${g[b.key].toLocaleString()}</text>`;
+      } else if(h >= fs + 3){
+        seg += `<text x="${x+bw/2}" y="${yTop+h/2+fs*0.35}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="#fff" font-family="JetBrains Mono, monospace">${pctTxt}</text>`;
+      }
     });
     bars += `<g clip-path="url(#tsc${i})">${seg}</g>`;
-    bars += `<text x="${x+bw/2}" y="${padT-9}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${isSel?'#1D4ED8':'var(--slate)'}" font-family="JetBrains Mono, monospace">${sum(g).toLocaleString()}</text>`;
-    const lab = byDay ? String(+k.slice(8)) : fmtMonth(k);
+    bars += `<text x="${x+bw/2}" y="${barTop-7}" text-anchor="middle" font-size="${fs+1}" font-weight="700" fill="${isSel?'#1D4ED8':'var(--ink)'}" font-family="JetBrains Mono, monospace">${sum(g).toLocaleString()}</text>`;
+    const lab = byDay ? String(+k.slice(8)) : byWeek ? 'W' + (+k.split('-')[1]) : fmtMonth(k);
     xl += `<text x="${x+bw/2}" y="${H-padB+20}" text-anchor="middle" font-size="${keys.length>20?11:12}" font-weight="${isSel?700:500}" fill="${isSel?'#1D4ED8':'var(--slate)'}">${lab}</text>`;
     hits += `<g data-key="${k}" style="cursor:pointer"><title>${wowEsc(keyLabel(k))} — ${tip} | Total: ${sum(g).toLocaleString()}</title><rect x="${gx}" y="0" width="${gw}" height="${H}" fill="transparent"/></g>`;
   });
   const legend = TS_BUCKETS.map(b=>`<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${b.color}"></span>${b.label}</div>`).join('')
-    + `<div class="compare-chart-legend-item" style="margin-left:auto;font-weight:500;color:var(--slate-light);">Number above each bar = total runs</div>`;
+    + `<div class="compare-chart-legend-item" style="margin-left:auto;font-weight:500;color:var(--slate-light);">${isAbs ? 'Bar height = total runs · number on top = total · % = share of each trip' : 'Number on top = total runs · % = share of each trip'}</div>`;
   chartEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${grid}${bars}${xl}${hits}</svg><div class="compare-chart-legend">${legend}</div>`;
 
   // ---------- detail for the selected day / month ----------
@@ -3452,7 +3451,7 @@ function renderTripSequence(){
   tableEl.innerHTML = `
     <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:18px 0 12px;padding-top:16px;border-top:1px solid var(--line);">
       <div class="panel-title" style="margin:0;">Detail — ${wowEsc(keyLabel(selKey))}</div>
-      <span style="font-size:12px;color:var(--slate-light);">${selKey === keys[keys.length-1] ? 'latest ' + (byDay?'day':'month') + ' · ' : ''}pick another ${byDay?'day':'month'}:</span>
+      <span style="font-size:12px;color:var(--slate-light);">${selKey === keys[keys.length-1] ? 'latest ' + unit + ' · ' : ''}pick another ${unit}:</span>
       <select id="tsSelKey" class="trend-month-select">${selOpts}</select>
     </div>
     <div class="wc-cards">${cards}</div>
@@ -3482,7 +3481,6 @@ function render(){
   }
 
   renderKpis(computeKpis(rows));
-  renderTripTrendPanel();
   renderTripSequence();
   renderProjectBars(rows);
   renderCostByProjectBars(rows);
