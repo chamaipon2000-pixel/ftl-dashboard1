@@ -729,6 +729,7 @@
   .wc-hm.p1{ background:#E3F5EC; color:#1F7A52; } .wc-hm.p2{ background:#9BDBBC; color:#0F4A31; } .wc-hm.p3{ background:#1F7A52; color:#fff; }
   .wc-hm.n1{ background:#FBE5E5; color:#A82D2D; } .wc-hm.n2{ background:#F2A6A6; color:#6B1717; } .wc-hm.n3{ background:#B83232; color:#fff; }
   .wc-hm.sel{ box-shadow:inset 0 0 0 2px #2F80ED; }
+  .wc-dcard.wc-hint{ background:var(--paper); border-style:dashed; font-size:13px; color:var(--slate); }
   .wc-table th.wc-hm-sel{ background:#DBEAFE; color:#1D4ED8; }
   .compare-chart-legend{
     display:flex;
@@ -753,6 +754,14 @@
     flex:none;
   }
   .compare-chart-wrap{ position:relative; }
+  .pw-controls{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; margin:4px 0 12px; }
+  .pw-chips{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .pw-chip{ display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:20px; padding:3px 6px 3px 10px; font-size:12px; font-weight:600; color:var(--slate); background:#fff; }
+  .pw-chip i{ width:10px; height:10px; border-radius:3px; flex:none; }
+  .pw-chip button{ border:none; background:none; cursor:pointer; color:var(--slate-light); font-size:15px; line-height:1; padding:0 4px; }
+  .pw-chip button:hover{ color:var(--red); }
+  .pw-search{ width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:13px; margin-bottom:6px; }
+  .pw-n{ font-size:11px; color:var(--slate-light); font-style:normal; font-family:'JetBrains Mono', monospace; }
   .compare-chart-tooltip{
     position:absolute;
     display:none;
@@ -974,12 +983,34 @@
     <div id="tripTrendChart" class="trend-chart"></div>
   </div>
 
+  <div class="trend-panel">
+    <div class="trend-panel-header">
+      <div>
+        <div class="panel-title">Trip Sequence Mix — % by Trip No. (1 / 2 / 3 / 4+)</div>
+        <div class="panel-desc" id="tsDesc">Share of runs by trip number</div>
+      </div>
+      <div class="trend-controls">
+        <div class="seg trend-seg" id="tsModeToggle">
+          <button data-mode="day" class="active">Daily</button>
+          <button data-mode="month">Monthly</button>
+        </div>
+        <select id="tsMonthSelect" class="trend-month-select"></select>
+      </div>
+    </div>
+    <div id="tsChart"></div>
+    <div id="tsTable" style="overflow-x:auto;"></div>
+  </div>
+
   <div class="panels panels-1">
     <div class="panel">
       <div class="panel-title">Trip Volume by Project — Weekly</div>
-      <div class="panel-desc">Trips per week (Sun–Sat, matching Excel's WEEKNUM), compared across projects, spanning the full dataset</div>
-      <div class="mom-controls">
-        <div class="mom-multi" id="pwProjectWrap"><button type="button" id="pwProjectBtn" class="trend-month-select mom-multi-btn"><span>All Projects</span></button><div class="mom-multi-menu" id="pwProjectMenu"></div></div>
+      <div class="panel-desc">Trips per week (Sun–Sat, matching Excel's WEEKNUM), spanning the full dataset · pick the projects to compare</div>
+      <div class="pw-controls">
+        <div class="mom-multi" id="pwWrap"><button type="button" id="pwBtn" class="trend-month-select mom-multi-btn"><span>Top 5 projects</span></button>
+          <div class="mom-multi-menu" id="pwMenu"><input type="search" id="pwSearch" class="pw-search" placeholder="Search project…" aria-label="Search project">
+            <div class="mom-multi-actions"><button type="button" data-pw-act="top5">Top 5</button><button type="button" data-pw-act="all">All</button><button type="button" data-pw-act="none">Clear</button></div>
+            <div id="pwList"></div></div></div>
+        <div class="pw-chips" id="pwChips"></div>
       </div>
       <div class="panel-body" id="projectWeeklyCompareChart"></div>
     </div>
@@ -1881,33 +1912,57 @@ function renderCostByProjectBars(rows){
 // ---------- Render Trip Volume by Project — Weekly comparison chart ----------
 const PROJECT_COMPARE_COLORS = ['#7C5CFC', '#E8863A', '#2E9E6D', '#D64545', '#2F80ED', '#C2A833', '#8E44AD', '#16A3B8', '#EA4C89', '#556B2F'];
 
-// Project picker state: 'all' = every project (default, follows new data), otherwise a Set of chosen names.
-const pwState = { selected: 'all', allProjects: [], current: new Set(), ready: false };
-
+// Project picker for "Trip Volume by Project — Weekly": default = top 5 by total trips.
+const pwState = { sel: null, ready: false, current: [], all: [] };
+const pwEsc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function pwApplySearch(){
+  const q = (document.getElementById('pwSearch').value || '').trim().toLowerCase();
+  document.querySelectorAll('#pwList .mom-multi-item').forEach(it=>{
+    it.style.display = !q || it.dataset.name.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+function pwToggle(name, on){
+  const set = new Set(pwState.sel || pwState.current);
+  if(on) set.add(name); else set.delete(name);
+  pwState.sel = set; renderProjectWeeklyComparison();
+}
 function pwSetup(){
   if(pwState.ready) return;
+  const wrap = document.getElementById('pwWrap'); if(!wrap) return;
   pwState.ready = true;
-  const wrap = document.getElementById('pwProjectWrap');
-  document.getElementById('pwProjectBtn').addEventListener('click', e=>{ e.stopPropagation(); wrap.classList.toggle('open'); });
-  document.addEventListener('click', e=>{ if(!wrap.contains(e.target)) wrap.classList.remove('open'); });
+  document.getElementById('pwBtn').addEventListener('click', ()=>{
+    wrap.classList.toggle('open');
+    if(wrap.classList.contains('open')) document.getElementById('pwSearch').focus();
+  });
+  document.addEventListener('click', e=>{ if(!e.composedPath().includes(wrap)) wrap.classList.remove('open'); });
   document.addEventListener('keydown', e=>{ if(e.key === 'Escape') wrap.classList.remove('open'); });
-  document.getElementById('pwProjectMenu').addEventListener('click', e=>{
-    e.stopPropagation();
-    const only = e.target.closest('button[data-only]');
-    if(only){ e.preventDefault(); pwState.selected = new Set([only.dataset.only]); wrap.classList.remove('open'); renderProjectWeeklyComparison(); return; }
-    const act = e.target.closest('button[data-act]');
-    if(act){
-      pwState.selected = act.dataset.act === 'all' ? 'all'
-                       : act.dataset.act === 'none' ? new Set() : new Set(pwState.top5 || []);
-      renderProjectWeeklyComparison(); return;
-    }
-    const cb = e.target.closest('input[data-project]');
-    if(!cb) return;
-    const cur = new Set(pwState.current);
-    cb.checked ? cur.add(cb.dataset.project) : cur.delete(cb.dataset.project);
-    pwState.selected = cur;
+  document.getElementById('pwSearch').addEventListener('input', pwApplySearch);
+  const menu = document.getElementById('pwMenu');
+  menu.addEventListener('change', e=>{ const cb = e.target.closest('[data-pw-p]'); if(cb) pwToggle(cb.dataset.pwP, cb.checked); });
+  menu.addEventListener('click', e=>{
+    const a = e.target.closest('[data-pw-act]'); if(!a) return;
+    pwState.sel = a.dataset.pwAct === 'top5' ? null : a.dataset.pwAct === 'all' ? new Set(pwState.all) : new Set();
     renderProjectWeeklyComparison();
   });
+  document.getElementById('pwChips').addEventListener('click', e=>{
+    const r = e.target.closest('[data-pw-remove]'); if(r) pwToggle(r.dataset.pwRemove, false);
+  });
+}
+function pwRenderControls(byTotal, chosen, pTotal){
+  const btn = document.getElementById('pwBtn'); if(!btn) return;
+  pwState.current = chosen; pwState.all = byTotal;
+  const chosenSet = new Set(chosen);
+  let label;
+  if(!pwState.sel) label = `Top ${chosen.length} projects`;
+  else if(!chosen.length) label = 'No project selected';
+  else if(chosen.length === byTotal.length) label = `All projects (${chosen.length})`;
+  else if(chosen.length <= 2) label = chosen.join(', ');
+  else label = `${chosen.length} projects selected`;
+  btn.firstElementChild.textContent = label;
+  document.getElementById('pwList').innerHTML = byTotal.map(p=>`<label class="mom-multi-item" data-name="${pwEsc(p)}"><input type="checkbox" data-pw-p="${pwEsc(p)}" ${chosenSet.has(p)?'checked':''}><span>${pwEsc(p)}</span><em class="pw-n">${pTotal(p).toLocaleString()}</em></label>`).join('');
+  document.getElementById('pwChips').innerHTML = chosen.map((p,i)=>`<span class="pw-chip"><i style="background:${PROJECT_COMPARE_COLORS[i % PROJECT_COMPARE_COLORS.length]}"></i>${pwEsc(p)}<button type="button" data-pw-remove="${pwEsc(p)}" aria-label="Remove ${pwEsc(p)}">×</button></span>`).join('')
+    + (chosen.length > PROJECT_COMPARE_COLORS.length ? '<span style="font-size:12px;color:var(--slate-light);">colors repeat beyond 10 lines — hover a line to see its name</span>' : '');
+  pwApplySearch();
 }
 
 function renderProjectWeeklyComparison(){
@@ -1917,35 +1972,7 @@ function renderProjectWeeklyComparison(){
   // spans the whole dataset (every week that has data), not just one month,
   // so trends across projects can be compared over the full period on file.
   const rows = getEntityFiltered();
-  const allProjects = [...new Set(rows.map(r=>r.project).filter(Boolean))].sort();
-  pwState.allProjects = allProjects;
-  // Each project keeps the same colour no matter which ones are selected.
-  const colorOfProject = p => PROJECT_COMPARE_COLORS[allProjects.indexOf(p) % PROJECT_COMPARE_COLORS.length];
-
-  const grandTotals = {};
-  rows.forEach(r=>{ if(r.project) grandTotals[r.project] = (grandTotals[r.project]||0) + (r.trip||0); });
-  pwState.top5 = allProjects.slice().sort((a,b)=> (grandTotals[b]||0) - (grandTotals[a]||0)).slice(0,5);
-  let projects;
-  if(pwState.selected === 'all'){
-    projects = allProjects.slice();
-  } else {
-    projects = allProjects.filter(p=>pwState.selected.has(p));
-  }
-  pwState.current = new Set(projects);
-
-  // Picker menu + button label
-  const menu = document.getElementById('pwProjectMenu');
-  const keep = menu.scrollTop;
-  menu.innerHTML =
-    '<div class="mom-multi-actions"><button type="button" data-act="all">All Projects</button><button type="button" data-act="top5">Top 5</button><button type="button" data-act="none">Clear</button></div>' +
-    allProjects.map(p=>`<label class="mom-multi-item"><input type="checkbox" data-project="${wowEsc(p)}" ${projects.includes(p)?'checked':''}><span style="display:flex;align-items:center;gap:8px;"><i class="compare-chart-legend-swatch" style="background:${colorOfProject(p)}"></i>${wowEsc(p)}</span><button type="button" class="mom-only" data-only="${wowEsc(p)}" title="Show this project only">Only</button></label>`).join('');
-  menu.scrollTop = keep;
-  document.querySelector('#pwProjectBtn span').textContent =
-    pwState.selected === 'all' ? 'All Projects'
-    : projects.length === allProjects.length && allProjects.length ? 'All Projects'
-    : projects.length === 0 ? 'No project selected'
-    : projects.length <= 2 ? projects.join(', ')
-    : `${projects.length} projects selected`;
+  const projects = [...new Set(rows.map(r=>r.project).filter(Boolean))].sort();
 
   const weekInfo = {}; // "year-week" -> {year, week}
   const projectTotals = {}; // project -> "year-week" -> total trips
@@ -1962,17 +1989,22 @@ function renderProjectWeeklyComparison(){
     return (wa.year - wb.year) || (wa.week - wb.week);
   });
 
-  if(!weekKeys.length || !allProjects.length){
+  if(!weekKeys.length || !projects.length){
     el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;">No data for the selected filters</div>';
     return;
   }
-  if(!projects.length){
-    el.innerHTML = '<div style="color:var(--slate-light);font-size:12px;padding:20px 0;">Select at least one project</div>';
+
+  const pTotal = p => Object.values(projectTotals[p] || {}).reduce((x,y)=>x+y, 0);
+  const byTotal = [...projects].sort((a,b)=> (pTotal(b) - pTotal(a)) || a.localeCompare(b));
+  const chosen = pwState.sel ? byTotal.filter(p=>pwState.sel.has(p)) : byTotal.slice(0, 5);
+  pwRenderControls(byTotal, chosen, pTotal);
+  if(!chosen.length){
+    el.innerHTML = '<div style="color:var(--slate-light);font-size:13px;padding:30px 0;text-align:center;">Select at least one project from the list above</div>';
     return;
   }
 
   let maxVal = 0;
-  projects.forEach(p=>{
+  chosen.forEach(p=>{
     weekKeys.forEach(k=>{
       const v = (projectTotals[p] && projectTotals[p][k]) || 0;
       if(v > maxVal) maxVal = v;
@@ -2001,8 +2033,8 @@ function renderProjectWeeklyComparison(){
     return `<text x="${xFor(i)}" y="${H - padBottom + 16}" text-anchor="middle" font-size="10" fill="var(--slate-light)">W${weekInfo[k].week}</text>`;
   }).join('');
 
-  const lines = projects.map((p)=>{
-    const color = colorOfProject(p);
+  const lines = chosen.map((p, pi)=>{
+    const color = PROJECT_COMPARE_COLORS[pi % PROJECT_COMPARE_COLORS.length];
     const pointList = weekKeys.map((k,i)=>{
       const v = (projectTotals[p] && projectTotals[p][k]) || 0;
       return { cx: xFor(i), cy: yFor(v), week: weekInfo[k].week, value: v };
@@ -2029,7 +2061,6 @@ function renderProjectWeeklyComparison(){
 
   const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${gridLines}${lines}${xLabels}</svg>`;
 
-  // No legend here: projects are chosen via the picker above the chart (colours are shown in its menu).
   el.innerHTML = `<div class="compare-chart-wrap">${svg}<div class="compare-chart-tooltip" id="compareChartTooltip"></div></div>`;
 
   // Wire up hover: show project name + trip count next to whichever point
@@ -2759,12 +2790,12 @@ function wcSetup(){
     if(tg){ if(tg.dataset.toggle === 'dayAll') wcState.dayAll = !wcState.dayAll; else wcState.hmOpen = !wcState.hmOpen; renderWeekCompare(); return; }
     if(e.target.closest('[data-dow-auto]')){ wcState.dow = null; wcState.dayAll = false; renderWeekCompare(); return; }
     const t = e.target.closest('[data-dow]'); if(!t) return;
-    wcState.dow = +t.dataset.dow; wcState.dayAll = false; renderWeekCompare();
+    const n = +t.dataset.dow; wcState.dow = (wcState.dow === n) ? null : n; wcState.dayAll = false; renderWeekCompare();
   });
   dowHost.addEventListener('keydown', e=>{
     if(e.key !== 'Enter' && e.key !== ' ') return;
     const t = e.target.closest('[data-dow]'); if(!t) return;
-    e.preventDefault(); wcState.dow = +t.dataset.dow; wcState.dayAll = false; renderWeekCompare();
+    e.preventDefault(); const n = +t.dataset.dow; wcState.dow = (wcState.dow === n) ? null : n; wcState.dayAll = false; renderWeekCompare();
   });
 }
 
@@ -2879,9 +2910,8 @@ function renderWeekCompare(){
   const gw = cw / 7, bw = Math.min(34, gw * 0.36);
   const yOf = v => padT + ch - (v / maxV) * ch;
   const dd = dowB.map((v,i)=> v - dowA[i]);
-  const autoDow = dd.reduce((best,v,i)=> Math.abs(v) > Math.abs(dd[best]) ? i : best, 0);
-  const selDow = (wcState.dow !== null && wcState.dow >= 0 && wcState.dow <= 6) ? wcState.dow : autoDow;
-  const hl = `<rect x="${padL + selDow*gw + 2}" y="6" width="${gw-4}" height="${H-10}" rx="8" fill="#EFF6FF" stroke="#2F80ED" stroke-width="1.5"/>`;
+  const selDow = (wcState.dow !== null && wcState.dow >= 0 && wcState.dow <= 6) ? wcState.dow : null; // null = whole week
+  const hl = selDow === null ? '' : `<rect x="${padL + selDow*gw + 2}" y="6" width="${gw-4}" height="${H-10}" rx="8" fill="#EFF6FF" stroke="#2F80ED" stroke-width="1.5"/>`;
   let grid = '', bars = '', ov = '';
   [0,0.5,1].forEach(f=>{
     const y = padT + ch - f*ch;
@@ -2899,46 +2929,9 @@ function renderWeekCompare(){
     bars += `<text x="${cx}" y="${H-padB+38}" text-anchor="middle" font-size="12" font-weight="700" fill="${dv>0?'#1F7A52':dv<0?'#B83232':'var(--slate)'}">${dv>0?'▲ +':dv<0?'▼ −':''}${dv ? Math.abs(dv).toLocaleString() : '0'}</text>`;
     ov += `<g data-dow="${i}" role="button" tabindex="0" style="cursor:pointer" aria-label="${d}: ${sgn(dv)} ${M.unit} — show which projects changed"><title>${d}: ${wkA} ${dowA[i].toLocaleString()} → ${wkB} ${dowB[i].toLocaleString()} (click for project breakdown)</title><rect x="${padL + i*gw}" y="0" width="${gw}" height="${H}" fill="transparent"/></g>`;
   });
-  dowEl.innerHTML = `<div class="wc-section">By day of the week <span style="font-weight:400;color:var(--slate);">· click a day to see which projects changed</span></div>
+  dowEl.innerHTML = `<div class="wc-section">By day of the week <span style="font-weight:400;color:var(--slate);">· click a day to see only that day (click again to go back)</span></div>
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${hl}${grid}${bars}${ov}</svg>
     <div class="compare-chart-legend"><div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:#94A3B8"></span>${wkA}</div><div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:#2F80ED"></span>${wkB}</div></div>`;
-
-  // ---- day drill-down: headline + top contributors (heatmap is opt-in) ----
-  const dayDate = (k, i) => { const d = new Date(wowWeekRange(weekMap[k].year, weekMap[k].week).start + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0,10); };
-  const dateA = dayDate(A, selDow), dateB = dayDate(B, selDow);
-  const dayA = dowA[selDow], dayB = dowB[selDow], dayD = dayB - dayA;
-  const allRows = list.map(o=>({ label:o.label, a:o.da[selDow], b:o.db[selDow], diff:o.db[selDow] - o.da[selDow] })).filter(o=>o.a || o.b);
-  const changed = allRows.filter(o=>o.diff !== 0).sort((x,y)=> (Math.abs(y.diff) - Math.abs(x.diff)) || x.label.localeCompare(y.label));
-  const TOP_N = 5;
-  const shownRows = wcState.dayAll ? changed : changed.slice(0, TOP_N);
-  const restRows = wcState.dayAll ? [] : changed.slice(TOP_N);
-  const dMax = Math.max(1, ...changed.map(o=>Math.abs(o.diff)));
-  const dayRowHtml = o=>{
-    const cls = o.diff > 0 ? 'wc-pos' : 'wc-neg';
-    const badge = !o.a && o.b ? '<span class="wc-badge new">NEW</span>' : (o.a && !o.b ? '<span class="wc-badge stop">NONE</span>' : '');
-    return `<tr><td>${wowEsc(o.label)}${badge}</td><td>${o.a.toLocaleString()}</td><td>${o.b.toLocaleString()}</td>
-      <td class="wc-bar-cell"><div class="wc-bar"><i class="${o.diff>0?'up':'down'}" style="width:${Math.abs(o.diff)/dMax*50}%"></i></div></td>
-      <td class="${cls}">${sgn(o.diff)}</td></tr>`;
-  };
-  let otherRow = '';
-  if(restRows.length){
-    const ra = restRows.reduce((x,o)=>x+o.a,0), rb = restRows.reduce((x,o)=>x+o.b,0), rd = rb - ra;
-    otherRow = `<tr class="wc-other"><td>${restRows.length} other project${restRows.length>1?'s':''} (small changes)</td><td>${ra.toLocaleString()}</td><td>${rb.toLocaleString()}</td><td class="wc-bar-cell"></td><td class="${rd>0?'wc-pos':rd<0?'wc-neg':''}">${rd ? sgn(rd) : '0'}</td></tr>`;
-  }
-  const unchangedN = allRows.length - changed.length;
-  let dayInsight;
-  if(dayD === 0){
-    const g = changed.filter(o=>o.diff>0).reduce((x,o)=>x+o.diff,0), l = changed.filter(o=>o.diff<0).reduce((x,o)=>x+o.diff,0);
-    dayInsight = g || l ? `No net change — gains <b class="wc-pos">+${g.toLocaleString()}</b> offset by losses <b class="wc-neg">−${Math.abs(l).toLocaleString()}</b>` : 'No change on this day';
-  } else {
-    const pool = changed.filter(o=> dayD > 0 ? o.diff > 0 : o.diff < 0).sort((x,y)=> dayD > 0 ? y.diff - x.diff : x.diff - y.diff);
-    let acc = 0; const pick = [];
-    for(const o of pool){ pick.push(o); acc += o.diff; if(acc / dayD >= 0.7 || pick.length >= 3) break; }
-    dayInsight = `${pick.map(o=>`<b>${wowEsc(o.label)}</b> ${sgn(o.diff)}`).join(', ')} — ${Math.round(acc / dayD * 100)}% of the change`;
-  }
-  const noData = [dateA, dateB].filter(d=>d > lastDate).map(fmtDateShort);
-  const dayTotRow = `<tr class="wc-total"><td>Total</td><td>${dayA.toLocaleString()}</td><td>${dayB.toLocaleString()}</td><td class="wc-bar-cell"></td><td class="${dayD>0?'wc-pos':dayD<0?'wc-neg':''}">${dayD ? sgn(dayD) : '0'}</td></tr>`;
-  const toggleBtn = changed.length > TOP_N ? `<button type="button" class="wc-more" data-toggle="dayAll">${wcState.dayAll ? 'Show top ' + TOP_N + ' only' : `Show all ${changed.length} changed projects`}</button>` : '';
 
   // ---- project × day heatmap (opt-in) ----
   let hmHtml = '';
@@ -2955,22 +2948,64 @@ function renderWeekCompare(){
     hmHtml = `<div style="font-size:12.5px;color:var(--slate);margin:10px 0 8px;">${wkB} − ${wkA} per weekday · click a cell to open that day${hiddenN > 0 ? ` · ${hiddenN} unchanged project${hiddenN>1?'s':''} hidden` : ''}</div>
       <div class="wc-scroll"><table class="wc-table"><thead><tr><th>Project</th>${hmHead}<th>Week</th></tr></thead><tbody>${hmBody}</tbody><tfoot>${hmFoot}</tfoot></table></div>`;
   }
+  const hmToggle = `<button type="button" class="wc-more" data-toggle="hm">${wcState.hmOpen ? 'Hide' : 'Show'} week overview (project × day)</button>`;
 
-  dowEl.insertAdjacentHTML('beforeend', `<div class="wc-drill">
-    <div class="wc-dcard">
+  let drillCard;
+  if(selDow === null){
+    // No day selected: whole-week view. The project table below already holds the combined breakdown.
+    drillCard = `<div class="wc-dcard wc-hint"><div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;"><span>Showing the <b>whole week</b> — project breakdown is in the table below. Click a day above to see only that day.</span>${hmToggle}</div>${hmHtml}</div>`;
+  } else {
+    // ---- day drill-down: headline + top contributors ----
+    const dayDate = (k, i) => { const d = new Date(wowWeekRange(weekMap[k].year, weekMap[k].week).start + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0,10); };
+    const dateA = dayDate(A, selDow), dateB = dayDate(B, selDow);
+    const dayA = dowA[selDow], dayB = dowB[selDow], dayD = dayB - dayA;
+    const allRows = list.map(o=>({ label:o.label, a:o.da[selDow], b:o.db[selDow], diff:o.db[selDow] - o.da[selDow] })).filter(o=>o.a || o.b);
+    const changed = allRows.filter(o=>o.diff !== 0).sort((x,y)=> (Math.abs(y.diff) - Math.abs(x.diff)) || x.label.localeCompare(y.label));
+    const TOP_N = 5;
+    const shownRows = wcState.dayAll ? changed : changed.slice(0, TOP_N);
+    const restRows = wcState.dayAll ? [] : changed.slice(TOP_N);
+    const dMax = Math.max(1, ...changed.map(o=>Math.abs(o.diff)));
+    const dayRowHtml = o=>{
+      const cls = o.diff > 0 ? 'wc-pos' : 'wc-neg';
+      const badge = !o.a && o.b ? '<span class="wc-badge new">NEW</span>' : (o.a && !o.b ? '<span class="wc-badge stop">NONE</span>' : '');
+      return `<tr><td>${wowEsc(o.label)}${badge}</td><td>${o.a.toLocaleString()}</td><td>${o.b.toLocaleString()}</td>
+        <td class="wc-bar-cell"><div class="wc-bar"><i class="${o.diff>0?'up':'down'}" style="width:${Math.abs(o.diff)/dMax*50}%"></i></div></td>
+        <td class="${cls}">${sgn(o.diff)}</td></tr>`;
+    };
+    let otherRow = '';
+    if(restRows.length){
+      const ra = restRows.reduce((x,o)=>x+o.a,0), rb = restRows.reduce((x,o)=>x+o.b,0), rd = rb - ra;
+      otherRow = `<tr class="wc-other"><td>${restRows.length} other project${restRows.length>1?'s':''} (small changes)</td><td>${ra.toLocaleString()}</td><td>${rb.toLocaleString()}</td><td class="wc-bar-cell"></td><td class="${rd>0?'wc-pos':rd<0?'wc-neg':''}">${rd ? sgn(rd) : '0'}</td></tr>`;
+    }
+    const unchangedN = allRows.length - changed.length;
+    let dayInsight;
+    if(dayD === 0){
+      const g = changed.filter(o=>o.diff>0).reduce((x,o)=>x+o.diff,0), l = changed.filter(o=>o.diff<0).reduce((x,o)=>x+o.diff,0);
+      dayInsight = g || l ? `No net change — gains <b class="wc-pos">+${g.toLocaleString()}</b> offset by losses <b class="wc-neg">−${Math.abs(l).toLocaleString()}</b>` : 'No change on this day';
+    } else {
+      const pool = changed.filter(o=> dayD > 0 ? o.diff > 0 : o.diff < 0).sort((x,y)=> dayD > 0 ? y.diff - x.diff : x.diff - y.diff);
+      let acc = 0; const pick = [];
+      for(const o of pool){ pick.push(o); acc += o.diff; if(acc / dayD >= 0.7 || pick.length >= 3) break; }
+      dayInsight = `${pick.map(o=>`<b>${wowEsc(o.label)}</b> ${sgn(o.diff)}`).join(', ')} — ${Math.round(acc / dayD * 100)}% of the change`;
+    }
+    const noData = [dateA, dateB].filter(d=>d > lastDate).map(fmtDateShort);
+    const dayTotRow = `<tr class="wc-total"><td>Total</td><td>${dayA.toLocaleString()}</td><td>${dayB.toLocaleString()}</td><td class="wc-bar-cell"></td><td class="${dayD>0?'wc-pos':dayD<0?'wc-neg':''}">${dayD ? sgn(dayD) : '0'}</td></tr>`;
+    const toggleBtn = changed.length > TOP_N ? `<button type="button" class="wc-more" data-toggle="dayAll">${wcState.dayAll ? 'Show top ' + TOP_N + ' only' : `Show all ${changed.length} changed projects`}</button>` : '';
+    drillCard = `<div class="wc-dcard">
       <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:2px;">
         <span style="font-size:20px;font-weight:700;color:var(--ink);">${WC_DOW[selDow]}</span>
         <span class="wc-card-value ${dayD>0?'up':dayD<0?'down':''}" style="font-size:26px;">${dayD ? sgn(dayD) : '0'}</span>
         <span style="font-size:13px;color:var(--slate);">${M.unit} · ${fmtDateShort(dateA)}: ${dayA.toLocaleString()} → ${fmtDateShort(dateB)}: ${dayB.toLocaleString()}</span>
-        ${wcState.dow !== null ? '<button type="button" class="wc-more" data-dow-auto="1" style="margin:0 0 0 auto;padding:3px 10px;">Show biggest change</button>' : ''}
+        <button type="button" class="wc-more" data-dow-auto="1" style="margin:0 0 0 auto;padding:3px 10px;">Show whole week</button>
       </div>
       <div style="font-size:14px;color:var(--ink);margin-bottom:10px;">${dayInsight}${noData.length ? ` · <span style="color:var(--red)">no data yet for ${noData.join(', ')}</span>` : ''}</div>
       <table class="wc-table wc-compact"><thead><tr><th>Project</th><th>${fmtDateShort(dateA)}</th><th>${fmtDateShort(dateB)}</th><th style="text-align:center">◀ lower · higher ▶</th><th>Δ ${M.unit}</th></tr></thead>
       <tbody>${shownRows.map(dayRowHtml).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--slate-light)">No change on this day</td></tr>'}${otherRow}${dayTotRow}</tbody></table>
-      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px;">${toggleBtn}<button type="button" class="wc-more" data-toggle="hm">${wcState.hmOpen ? 'Hide' : 'Show'} week overview (project × day)</button>${unchangedN > 0 ? `<span style="font-size:12px;color:var(--slate-light);">${unchangedN} project${unchangedN>1?'s':''} with no change not shown</span>` : ''}</div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px;">${toggleBtn}${hmToggle}${unchangedN > 0 ? `<span style="font-size:12px;color:var(--slate-light);">${unchangedN} project${unchangedN>1?'s':''} with no change not shown</span>` : ''}</div>
       ${hmHtml}
-    </div>
-  </div>`);
+    </div>`;
+  }
+  dowEl.insertAdjacentHTML('beforeend', `<div class="wc-drill">${drillCard}</div>`);
 
   // ---- project table with diverging change bars ----
   // Same order as the old Week-over-Week table: biggest increases first, then no change,
@@ -3271,6 +3306,103 @@ function renderMonthComparison(){
     : '';
 }
 
+
+// ---------- Trip Sequence Mix (% of runs by trip number 1 / 2 / 3 / 4+) ----------
+// Counts records (runs) grouped by the sheet's Trip column value:
+// 1 = first trip, 2 = second trip, 3 = third trip, 4+ = fourth or later.
+const TS_BUCKETS = [
+  { key:'1',  label:'Trip 1',  color:'#2F80ED' },
+  { key:'2',  label:'Trip 2',  color:'#E8863A' },
+  { key:'3',  label:'Trip 3',  color:'#2E9E6D' },
+  { key:'4+', label:'Trip 4+', color:'#D64545' }
+];
+const tsState = { mode:'day', month:null, ready:false };
+function tsBucket(r){
+  const t = Math.round(r.trip || 0);
+  if(t >= 4) return '4+';
+  if(t === 3) return '3';
+  if(t === 2) return '2';
+  return '1';
+}
+function tsSetup(){
+  if(tsState.ready) return;
+  tsState.ready = true;
+  document.getElementById('tsModeToggle').addEventListener('click', e=>{
+    const b = e.target.closest('button[data-mode]'); if(!b) return;
+    tsState.mode = b.dataset.mode; renderTripSequence();
+  });
+  document.getElementById('tsMonthSelect').addEventListener('change', e=>{
+    tsState.month = e.target.value; renderTripSequence();
+  });
+}
+function renderTripSequence(){
+  tsSetup();
+  const chartEl = document.getElementById('tsChart');
+  const tableEl = document.getElementById('tsTable');
+  const sel = document.getElementById('tsMonthSelect');
+  const rowsAll = getEntityFiltered().filter(r=>r.date);
+  const months = [...new Set(rowsAll.map(r=>r.month).filter(Boolean))].sort();
+  if(!months.length){
+    sel.innerHTML=''; chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return;
+  }
+  if(!tsState.month || !months.includes(tsState.month)) tsState.month = months[months.length-1];
+  sel.innerHTML = months.slice().reverse().map(m=>`<option value="${m}">${fmtMonth(m)}</option>`).join('');
+  sel.value = tsState.month;
+  sel.hidden = tsState.mode === 'month';
+  document.querySelectorAll('#tsModeToggle button').forEach(b=>b.classList.toggle('active', b.dataset.mode === tsState.mode));
+
+  const byDay = tsState.mode === 'day';
+  const rows = byDay ? rowsAll.filter(r=>r.month === tsState.month) : rowsAll;
+  const groups = {};
+  rows.forEach(r=>{
+    const g = byDay ? r.date : r.month;
+    if(!groups[g]) groups[g] = { '1':0,'2':0,'3':0,'4+':0 };
+    groups[g][tsBucket(r)] += 1;
+  });
+  const keys = Object.keys(groups).sort();
+  document.getElementById('tsDesc').textContent = byDay
+    ? `% of runs by trip number per day — ${fmtMonth(tsState.month)} (Project / Sub-contractor filters apply)`
+    : '% of runs by trip number per month — all months (Project / Sub-contractor filters apply)';
+  if(!keys.length){ chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return; }
+
+  const sum = g => g['1']+g['2']+g['3']+g['4+'];
+  const W=900, H=280, padL=44, padR=12, padT=16, padB=34;
+  const cw=W-padL-padR, ch=H-padT-padB, gw=cw/keys.length, bw=Math.min(40, gw*0.72);
+  let grid='', bars='', xl='';
+  [0,25,50,75,100].forEach(f=>{
+    const y = padT+ch-f/100*ch;
+    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)"/><text x="${padL-6}" y="${y+4}" text-anchor="end" font-size="10" fill="var(--slate-light)" font-family="JetBrains Mono, monospace">${f}%</text>`;
+  });
+  keys.forEach((k,i)=>{
+    const g = groups[k], tot = sum(g) || 1;
+    const x = padL + i*gw + (gw-bw)/2;
+    let yTop = padT+ch;
+    const tip = TS_BUCKETS.map(b=>`${b.label}: ${g[b.key].toLocaleString()} (${(g[b.key]/tot*100).toFixed(1)}%)`).join(' | ');
+    TS_BUCKETS.forEach(b=>{
+      const h = g[b.key]/tot*ch;
+      if(h <= 0) return;
+      yTop -= h;
+      bars += `<rect x="${x}" y="${yTop}" width="${bw}" height="${h}" fill="${b.color}"><title>${wowEsc(byDay?fmtDate(k):fmtMonth(k))} — ${tip}</title></rect>`;
+      if(h >= 14 && bw >= 26) bars += `<text x="${x+bw/2}" y="${yTop+h/2+3}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#fff" font-family="JetBrains Mono, monospace">${Math.round(g[b.key]/tot*100)}%</text>`;
+    });
+    const lab = byDay ? k.slice(8) : fmtMonth(k);
+    if(keys.length <= 16 || i % 2 === 0) xl += `<text x="${x+bw/2}" y="${H-padB+16}" text-anchor="middle" font-size="10" fill="var(--slate)">${lab}</text>`;
+  });
+  const legend = TS_BUCKETS.map(b=>`<div class="compare-chart-legend-item"><span class="compare-chart-legend-swatch" style="background:${b.color}"></span>${b.label}</div>`).join('');
+  chartEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">${grid}${bars}${xl}</svg><div class="compare-chart-legend">${legend}</div>`;
+
+  // table: count and % per period, plus total row
+  const pc = (n,t) => t ? (n/t*100).toFixed(1)+'%' : '–';
+  const tot = { '1':0,'2':0,'3':0,'4+':0 };
+  const body = keys.map(k=>{
+    const g = groups[k], t = sum(g);
+    TS_BUCKETS.forEach(b=>tot[b.key]+=g[b.key]);
+    return `<tr><td>${wowEsc(byDay?fmtDate(k):fmtMonth(k))}</td>${TS_BUCKETS.map(b=>`<td>${g[b.key].toLocaleString()} <span style="color:var(--slate-light)">(${pc(g[b.key],t)})</span></td>`).join('')}<td>${t.toLocaleString()}</td></tr>`;
+  }).join('');
+  const gt = sum(tot);
+  tableEl.innerHTML = `<table class="mom-table"><thead><tr><th>${byDay?'Date':'Month'}</th>${TS_BUCKETS.map(b=>`<th>${b.label}</th>`).join('')}<th>Total runs</th></tr></thead><tbody>${body}<tr class="mom-total"><td>Total</td>${TS_BUCKETS.map(b=>`<td>${tot[b.key].toLocaleString()} (${pc(tot[b.key],gt)})</td>`).join('')}<td>${gt.toLocaleString()}</td></tr></tbody></table>`;
+}
+
 function render(){
   const rows = getFiltered();
   document.getElementById('periodText').textContent =
@@ -3294,6 +3426,7 @@ function render(){
 
   renderKpis(computeKpis(rows));
   renderTripTrendPanel();
+  renderTripSequence();
   renderProjectBars(rows);
   renderCostByProjectBars(rows);
   renderProjectWeeklyComparison();
