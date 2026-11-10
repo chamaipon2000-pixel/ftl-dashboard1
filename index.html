@@ -3290,7 +3290,7 @@ const TS_BUCKETS = [
   { key:'2',  label:'Trip 2',  color:'#E8863A' },
   { key:'3',  label:'Trip 3',  color:'#2E9E6D' }
 ];
-const tsState = { mode:'day', scale:'abs', month:null, sel:null, ready:false };
+const tsState = { mode:'day', scale:'abs', month:null, monthManual:false, sel:null, selManual:false, ready:false };
 
 // The sheet's Trip column is 1 on every row (each row = one run), so the
 // trip number is derived instead: the Nth time the same plate runs on the
@@ -3321,22 +3321,26 @@ function tsSetup(){
   tsState.ready = true;
   document.getElementById('tsModeToggle').addEventListener('click', e=>{
     const b = e.target.closest('button[data-mode]'); if(!b) return;
-    tsState.mode = b.dataset.mode; tsState.sel = null; renderTripSequence();
+    tsState.mode = b.dataset.mode; tsState.sel = null; tsState.selManual = false; renderTripSequence();
   });
   document.getElementById('tsScaleToggle').addEventListener('click', e=>{
     const b = e.target.closest('button[data-scale]'); if(!b) return;
     tsState.scale = b.dataset.scale; renderTripSequence();
   });
   document.getElementById('tsMonthSelect').addEventListener('change', e=>{
-    tsState.month = e.target.value; tsState.sel = null; renderTripSequence();
+    tsState.month = e.target.value; tsState.monthManual = true; tsState.sel = null; tsState.selManual = false; renderTripSequence();
   });
   document.getElementById('tsChart').addEventListener('click', e=>{
     const g = e.target.closest('[data-key]'); if(!g) return;
-    tsState.sel = g.dataset.key; renderTripSequence();
+    tsState.sel = g.dataset.key; tsState.selManual = true; renderTripSequence();
   });
   document.getElementById('tsTable').addEventListener('change', e=>{
     if(e.target.id !== 'tsSelKey') return;
-    tsState.sel = e.target.value; renderTripSequence();
+    tsState.sel = e.target.value; tsState.selManual = true; renderTripSequence();
+  });
+  document.getElementById('tsTable').addEventListener('click', e=>{
+    if(!e.target.closest('#tsLatestBtn')) return;
+    tsState.sel = null; tsState.selManual = false; renderTripSequence();
   });
 }
 function renderTripSequence(){
@@ -3350,7 +3354,8 @@ function renderTripSequence(){
   if(!months.length){
     sel.innerHTML=''; chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return;
   }
-  if(!tsState.month || !months.includes(tsState.month)) tsState.month = months[months.length-1];
+  // Follow the latest month with data unless the user picked another month
+  if(!tsState.monthManual || !months.includes(tsState.month)){ tsState.month = months[months.length-1]; tsState.monthManual = false; }
   sel.innerHTML = months.slice().reverse().map(m=>`<option value="${m}">${fmtMonth(m)}</option>`).join('');
   sel.value = tsState.month;
   sel.hidden = tsState.mode !== 'day';
@@ -3371,7 +3376,8 @@ function renderTripSequence(){
   document.getElementById('tsDesc').textContent = `Total runs and % by trip number per ${unit}` + (byDay ? ` — ${fmtMonth(tsState.month)}` : ' — all months') + ' · trip N = Nth run of the same plate that day · click a bar to see that ' + unit + "'s detail";
   if(!keys.length){ chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return; }
   // Default to the latest day/month that has data
-  if(!keys.includes(tsState.sel)) tsState.sel = keys[keys.length-1];
+  // Follow the latest day/week/month with data unless the user picked another one
+  if(!tsState.selManual || !keys.includes(tsState.sel)){ tsState.sel = keys[keys.length-1]; tsState.selManual = false; }
   const selKey = tsState.sel;
 
   const sum = g => g['1']+g['2']+g['3'];
@@ -3453,6 +3459,7 @@ function renderTripSequence(){
       <div class="panel-title" style="margin:0;">Detail — ${wowEsc(keyLabel(selKey))}</div>
       <span style="font-size:12px;color:var(--slate-light);">${selKey === keys[keys.length-1] ? 'latest ' + unit + ' · ' : ''}pick another ${unit}:</span>
       <select id="tsSelKey" class="trend-month-select">${selOpts}</select>
+      ${selKey === keys[keys.length-1] ? '' : '<button id="tsLatestBtn" class="trend-month-select" style="cursor:pointer;font-weight:600;color:#1D4ED8;">Go to latest</button>'}
     </div>
     <div class="wc-cards">${cards}</div>
     <div class="wc-section">By project</div>
