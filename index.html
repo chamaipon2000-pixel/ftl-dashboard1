@@ -1323,6 +1323,7 @@ periodDateInput.addEventListener('change', ()=>{
 });
 
 rangeFromInput.addEventListener('change', ()=>{
+  rangeUserPicked = true;
   state.rangeFrom = rangeFromInput.value || null;
   // Keep the range sane: don't let "from" run past "to"
   if(state.rangeFrom && state.rangeTo && state.rangeFrom > state.rangeTo){
@@ -1333,6 +1334,7 @@ rangeFromInput.addEventListener('change', ()=>{
 });
 
 rangeToInput.addEventListener('change', ()=>{
+  rangeUserPicked = true;
   state.rangeTo = rangeToInput.value || null;
   if(state.rangeFrom && state.rangeTo && state.rangeTo < state.rangeFrom){
     state.rangeFrom = state.rangeTo;
@@ -1359,6 +1361,14 @@ clearFiltersBtn.addEventListener('click', ()=>{
   render();
 });
 
+let rangeUserPicked = false;
+function currentWeekRange(){
+  const t = new Date();
+  const sun = new Date(t.getFullYear(), t.getMonth(), t.getDate() - t.getDay());
+  const sat = new Date(sun.getFullYear(), sun.getMonth(), sun.getDate() + 6);
+  const f = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  return { from: f(sun), to: f(sat) };
+}
 function populatePeriodSelect(){
   periodSelect.innerHTML = '';
 
@@ -1376,16 +1386,13 @@ function populatePeriodSelect(){
     rangeToInput.removeAttribute('min');
     rangeToInput.removeAttribute('max');
 
-    // Default to the first 10 days of the dataset the first time Range is
-    // opened. Once the user has picked their own dates, leave them alone —
-    // don't snap back just because a date falls outside the loaded data.
-    const minDate = ALL_DATES[0] || '';
-    const maxDate = ALL_DATES[ALL_DATES.length-1] || '';
-    if(!state.rangeFrom){
-      state.rangeFrom = minDate;
-    }
-    if(!state.rangeTo){
-      state.rangeTo = ALL_DATES[Math.min(9, ALL_DATES.length-1)] || maxDate;
+    // Default to the current week (Sunday–Saturday, same week definition as
+    // the Week charts, based on today's date on this device). Once the user
+    // has picked their own dates, leave them alone.
+    if(!rangeUserPicked){
+      const cw = currentWeekRange();
+      state.rangeFrom = cw.from;
+      state.rangeTo = cw.to;
     }
     rangeFromInput.value = state.rangeFrom;
     rangeToInput.value = state.rangeTo;
