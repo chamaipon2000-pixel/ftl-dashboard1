@@ -981,6 +981,7 @@
           <button data-scale="pct">100%</button>
         </div>
         <select id="tsMonthSelect" class="trend-month-select"></select>
+        <div class="mom-field">Day <select id="tsDayFrom" class="trend-month-select"></select> to <select id="tsDayTo" class="trend-month-select"></select></div>
       </div>
     </div>
     <div id="tsChart"></div>
@@ -3323,7 +3324,7 @@ const TS_BUCKETS = [
   { key:'2',  label:'Trip 2',  color:'#E8863A' },
   { key:'3',  label:'Trip 3',  color:'#2E9E6D' }
 ];
-const tsState = { mode:'day', scale:'abs', month:null, monthManual:false, sel:null, selManual:false, ready:false };
+const tsState = { mode:'day', scale:'abs', month:null, monthManual:false, sel:null, selManual:false, ready:false, dayFrom:1, dayTo:31 };
 
 // The sheet's Trip column is 1 on every row (each row = one run), so the
 // trip number is derived instead: the Nth time the same plate runs on the
@@ -3363,6 +3364,20 @@ function tsSetup(){
   document.getElementById('tsMonthSelect').addEventListener('change', e=>{
     tsState.month = e.target.value; tsState.monthManual = true; tsState.sel = null; tsState.selManual = false; renderTripSequence();
   });
+  // Day range (day of the month, same idea as Month-over-Month): applies to every month shown.
+  const dFrom = document.getElementById('tsDayFrom'), dTo = document.getElementById('tsDayTo');
+  const dayOpts = Array.from({length:31}, (_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');
+  dFrom.innerHTML = dayOpts; dTo.innerHTML = dayOpts;
+  dFrom.addEventListener('change', e=>{
+    tsState.dayFrom = +e.target.value;
+    if(tsState.dayTo < tsState.dayFrom) tsState.dayTo = tsState.dayFrom;
+    tsState.sel = null; tsState.selManual = false; renderTripSequence();
+  });
+  dTo.addEventListener('change', e=>{
+    tsState.dayTo = +e.target.value;
+    if(tsState.dayFrom > tsState.dayTo) tsState.dayFrom = tsState.dayTo;
+    tsState.sel = null; tsState.selManual = false; renderTripSequence();
+  });
   document.getElementById('tsChart').addEventListener('click', e=>{
     const g = e.target.closest('[data-key]'); if(!g) return;
     tsState.sel = g.dataset.key; tsState.selManual = true; renderTripSequence();
@@ -3392,12 +3407,17 @@ function renderTripSequence(){
   sel.innerHTML = months.slice().reverse().map(m=>`<option value="${m}">${fmtMonth(m)}</option>`).join('');
   sel.value = tsState.month;
   sel.hidden = tsState.mode !== 'day';
+  document.getElementById('tsDayFrom').value = tsState.dayFrom;
+  document.getElementById('tsDayTo').value = tsState.dayTo;
   document.querySelectorAll('#tsScaleToggle button').forEach(b=>b.classList.toggle('active', b.dataset.scale === tsState.scale));
   document.querySelectorAll('#tsModeToggle button').forEach(b=>b.classList.toggle('active', b.dataset.mode === tsState.mode));
 
   const byDay = tsState.mode === 'day', byWeek = tsState.mode === 'week';
   const unit = byDay ? 'day' : byWeek ? 'week' : 'month';
-  const rows = byDay ? rowsAll.filter(r=>r.month === tsState.month) : rowsAll;
+  const rangeOn = !(tsState.dayFrom <= 1 && tsState.dayTo >= 31);
+  const inRange = r => { const d = +String(r.date).slice(8,10); return d >= tsState.dayFrom && d <= tsState.dayTo; };
+  const rangeTxt = rangeOn ? ` · day ${tsState.dayFrom}–${tsState.dayTo}` + (byDay ? '' : ' of each month') : '';
+  const rows = (byDay ? rowsAll.filter(r=>r.month === tsState.month) : rowsAll).filter(inRange);
   const keyOf = r => byDay ? r.date : byWeek ? tsWeekKey(r.date) : r.month;
   const groups = {};
   rows.forEach(r=>{
@@ -3406,7 +3426,7 @@ function renderTripSequence(){
     groups[g][tsBucket(r)] += 1;
   });
   const keys = Object.keys(groups).sort();
-  document.getElementById('tsDesc').textContent = `Total runs and % by trip number per ${unit}` + (byDay ? ` — ${fmtMonth(tsState.month)}` : ' — all months') + ' · trip N = Nth run of the same plate that day · click a bar to see that ' + unit + "'s detail";
+  document.getElementById('tsDesc').textContent = `Total runs and % by trip number per ${unit}` + (byDay ? ` — ${fmtMonth(tsState.month)}` : ' — all months') + rangeTxt + ' · trip N = Nth run of the same plate that day · click a bar to see that ' + unit + "'s detail";
   if(!keys.length){ chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return; }
   // Default to the latest day/month that has data
   // Follow the latest day/week/month with data unless the user picked another one
