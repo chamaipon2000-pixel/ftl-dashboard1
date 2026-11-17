@@ -1185,8 +1185,34 @@ function deriveZone(r){
   return sheetZone || '';
 }
 
+// Project names come straight from the sheet, so one project can arrive spelled
+// several ways ("DKSH" vs "DKSH " with a stray space, "PIZZA HUT" vs "Pizza Hut")
+// and then be listed twice in every picker and chart. Merge the variants: strip
+// stray/invisible whitespace, group case-insensitively, and use the most common spelling.
+// Different names that are really the same project. Key = lowercase name as it
+// appears in the sheet, value = the name to show. Add more pairs here as needed.
+const PROJECT_ALIASES = { 'pizza': 'PIZZA HUT' };
+
+function canonicalizeProjects(rows){
+  const clean = s => String(s || '').replace(/[\u200b\u200c\u200d\ufeff]/g, '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const tally = {};
+  rows.forEach(r=>{
+    r.project = clean(r.project);
+    if(!r.project) return;
+    if(PROJECT_ALIASES[r.project.toLowerCase()]) r.project = PROJECT_ALIASES[r.project.toLowerCase()];
+    const k = r.project.toLowerCase();
+    (tally[k] = tally[k] || {})[r.project] = ((tally[k] || {})[r.project] || 0) + 1;
+  });
+  const best = {};
+  Object.keys(tally).forEach(k=>{
+    best[k] = Object.entries(tally[k]).sort((a,b)=> (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1))[0][0];
+  });
+  rows.forEach(r=>{ if(r.project) r.project = best[r.project.toLowerCase()]; });
+  return rows;
+}
+
 function buildDataset(rawRecords){
-  return rawRecords.map(r => {
+  return canonicalizeProjects(rawRecords.map(r => {
     const box = toNum(r["Q'ty Box/Order"]);
     // Utilization = boxes carried / boxes for a full truck (125)
     // Rule: if no box quantity, utilization = 100%
@@ -1216,7 +1242,7 @@ function buildDataset(rawRecords){
       // recorded for this row", so it can be told apart from an actual ฿0.
       cost: toNum(r["Transpost Cost"])
     };
-  });
+  }));
 }
 
 const monthNamesEN = {'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
