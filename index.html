@@ -47,7 +47,7 @@
     background:linear-gradient(100deg,#16235A 0%,#1C2D6B 45%,#2A4AA5 100%);
     color:#fff;
     padding:18px 32px 20px;
-    min-height:200px;
+    min-height:210px;
     display:flex; align-items:center;
     position:relative;
     overflow:hidden;
@@ -83,13 +83,13 @@
     max-width:1320px;
     margin:0 auto;
     display:flex;
-    align-items:center;
-    justify-content:space-between;
-    flex-wrap:wrap;
-    gap:16px;
+    flex-direction:column;
+    align-items:flex-start;
+    justify-content:center;
+    gap:14px;
   }
   .brand-wrap{ display:flex; align-items:center; gap:20px; }
-  .brand-logo{ height:76px; width:auto; display:block; background:#fff; padding:8px 14px; border-radius:14px; box-shadow:0 6px 18px rgba(0,0,0,.25); }
+  .brand-logo{ height:108px; width:auto; display:block; background:#fff; padding:8px 14px; border-radius:14px; box-shadow:0 6px 18px rgba(0,0,0,.25); }
   .brand-divider{ width:1px; align-self:stretch; background:rgba(255,255,255,.28); }
   .brand-eyebrow{
     font-size:11px;
@@ -127,16 +127,16 @@
     color:#fff;
     background:rgba(255,255,255,.14);
     backdrop-filter:blur(6px);
-    font-size:13px;
+    font-size:12px;
     font-weight:600;
-    padding:8px 14px;
-    border-radius:8px;
+    padding:5px 11px;
+    border-radius:7px;
     cursor:pointer;
     font-family:inherit;
     transition:.15s;
   }
   .upload-btn:hover{ background:#fff; border-color:#fff; color:var(--navy-deep); }
-  .upload-btn svg{ width:14px; height:14px; flex-shrink:0; }
+  .upload-btn svg{ width:12px; height:12px; flex-shrink:0; }
   .upload-btn.spinning svg{ animation:spin 0.9s linear infinite; }
   @keyframes spin{ from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
 
@@ -144,10 +144,10 @@
     display:flex;
     align-items:center;
     gap:7px;
-    font-size:12px;
+    font-size:11px;
     color:#fff;
     font-family:"JetBrains Mono",monospace;
-    padding:4px 10px;
+    padding:3px 9px;
     background:rgba(16,26,70,.55);
     border-radius:20px;
   }
