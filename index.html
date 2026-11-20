@@ -3393,9 +3393,9 @@ function renderMonthComparison(){
 // Counts records (runs) grouped by the sheet's Trip column value:
 // 1 = first trip, 2 = second trip, 3 = third trip, 4+ = fourth or later.
 const TS_BUCKETS = [
-  { key:'1',  label:'Trip 1',  color:'#2E75B6' },
-  { key:'2',  label:'Trip 2',  color:'#FFC000' },
-  { key:'3',  label:'Trip 3',  color:'#002060' }
+  { key:'1',  label:'Trip 1',  color:'#002060', txt:'#fff' },
+  { key:'2',  label:'Trip 2',  color:'#FF6A13', txt:'#fff' },
+  { key:'3',  label:'Trip 3',  color:'#FFC000', txt:'#002060' }
 ];
 const tsState = { mode:'day', scale:'abs', month:null, monthManual:false, sel:null, selManual:false, ready:false, dayFrom:1, dayTo:31 };
 
@@ -3544,10 +3544,10 @@ function renderTripSequence(){
       seg += `<rect x="${x}" y="${yTop}" width="${bw}" height="${h}" fill="${b.color}" stroke="#fff" stroke-width="1"/>`;
       const pctTxt = Math.round(g[b.key]/tot*100) + '%';
       if(h >= 2*fs + 8 && bw >= 30){
-        seg += `<text x="${x+bw/2}" y="${yTop+h/2-1}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="#fff" font-family="JetBrains Mono, monospace">${pctTxt}</text>`
-             + `<text x="${x+bw/2}" y="${yTop+h/2+fs}" text-anchor="middle" font-size="${fs-1.5}" fill="#fff" fill-opacity=".85" font-family="JetBrains Mono, monospace">${g[b.key].toLocaleString()}</text>`;
+        seg += `<text x="${x+bw/2}" y="${yTop+h/2-1}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="${b.txt||'#fff'}" font-family="JetBrains Mono, monospace">${pctTxt}</text>`
+             + `<text x="${x+bw/2}" y="${yTop+h/2+fs}" text-anchor="middle" font-size="${fs-1.5}" fill="${b.txt||'#fff'}" fill-opacity=".85" font-family="JetBrains Mono, monospace">${g[b.key].toLocaleString()}</text>`;
       } else if(h >= fs + 3){
-        seg += `<text x="${x+bw/2}" y="${yTop+h/2+fs*0.35}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="#fff" font-family="JetBrains Mono, monospace">${pctTxt}</text>`;
+        seg += `<text x="${x+bw/2}" y="${yTop+h/2+fs*0.35}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="${b.txt||'#fff'}" font-family="JetBrains Mono, monospace">${pctTxt}</text>`;
       }
     });
     bars += `<g clip-path="url(#tsc${i})">${seg}</g>`;
