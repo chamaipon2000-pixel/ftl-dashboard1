@@ -970,73 +970,6 @@
   <div id="pageOverview">
   <div class="kpi-grid" id="kpiGrid"></div>
 
-  <div class="panels panels-3">
-    <div class="panel">
-      <div class="panel-title">By Vehicle Type</div>
-      <div class="panel-desc">Number of trips by type: 4W / 6W / 10W</div>
-      <div class="panel-body" id="typeBars"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">By Temperature</div>
-      <div class="panel-desc">Number of trips by Frozen / Chilled / Dry</div>
-      <div class="util-legend">
-        <span><i class="dot" style="background:#2E75B6"></i>Frozen</span>
-        <span><i class="dot" style="background:#00A0D0"></i>Chilled</span>
-        <span><i class="dot" style="background:#FFC000"></i>Dry</span>
-      </div>
-      <div class="panel-body" id="temperatureBars"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">By Zone</div>
-      <div class="panel-desc">Number of trips by region: BKK / Central / West / East / North / North East / South</div>
-      <div class="util-legend">
-        <span><i class="dot" style="background:#002060"></i>BKK</span>
-        <span><i class="dot" style="background:#2E75B6"></i>Central</span>
-        <span><i class="dot" style="background:#00A0D0"></i>West</span>
-        <span><i class="dot" style="background:#FFC000"></i>East</span>
-        <span><i class="dot" style="background:#FF6A13"></i>North</span>
-        <span><i class="dot" style="background:#FF0000"></i>North East</span>
-        <span><i class="dot" style="background:#7F8FB5"></i>South</span>
-      </div>
-      <div class="panel-body" id="zoneBars"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">% Utilization Distribution</div>
-      <div class="panel-desc">Share of trips by truck space utilization range</div>
-      <div class="util-legend">
-        <span><i class="dot" style="background:#FF0000"></i>&lt;50%</span>
-        <span><i class="dot" style="background:#FFC000"></i>50–99%</span>
-        <span><i class="dot" style="background:#2E75B6"></i>100%+</span>
-      </div>
-      <div class="panel-body" id="utilBars"></div>
-      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--slate);">
-        Formula: % Utilization = boxes carried ÷ 125 (boxes for a fully-loaded truck)<br>
-        Note: records without a box quantity (Q'ty Box/Order) are counted as 100% Utilization
-      </div>
-    </div>
-  </div>
-
-  <div class="panels">
-    <div class="panel">
-      <div class="panel-title">By Project</div>
-      <div class="panel-desc">Number of trips per project</div>
-      <div class="panel-body" id="projectBars"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">By Sub-contractor</div>
-      <div class="panel-desc">Number of trips per subcontractor</div>
-      <div class="panel-body" id="subcontractorBars"></div>
-    </div>
-  </div>
-
-  <div class="panels panels-1">
-    <div class="panel">
-      <div class="panel-title">Transport Cost by Project</div>
-      <div class="panel-desc">Total Transpost Cost (฿) per project for the selected period</div>
-      <div class="panel-body" id="costByProjectBars"></div>
-    </div>
-  </div>
-
   <div class="trend-panel">
     <div class="trend-panel-header">
       <div>
@@ -1116,11 +1049,77 @@
     </div>
   </div>
 
+  <div class="panels panels-3">
+    <div class="panel">
+      <div class="panel-title">By Vehicle Type</div>
+      <div class="panel-desc">Number of trips by type: 4W / 6W / 10W</div>
+      <div class="panel-body" id="typeBars"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">By Temperature</div>
+      <div class="panel-desc">Number of trips by Frozen / Chilled / Dry</div>
+      <div class="util-legend">
+        <span><i class="dot" style="background:#2E75B6"></i>Frozen</span>
+        <span><i class="dot" style="background:#00A0D0"></i>Chilled</span>
+        <span><i class="dot" style="background:#FFC000"></i>Dry</span>
+      </div>
+      <div class="panel-body" id="temperatureBars"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">By Zone</div>
+      <div class="panel-desc">Number of trips by region: BKK / Central / West / East / North / North East / South</div>
+      <div class="util-legend">
+        <span><i class="dot" style="background:#002060"></i>BKK</span>
+        <span><i class="dot" style="background:#2E75B6"></i>Central</span>
+        <span><i class="dot" style="background:#00A0D0"></i>West</span>
+        <span><i class="dot" style="background:#FFC000"></i>East</span>
+        <span><i class="dot" style="background:#FF6A13"></i>North</span>
+        <span><i class="dot" style="background:#FF0000"></i>North East</span>
+        <span><i class="dot" style="background:#7F8FB5"></i>South</span>
+      </div>
+      <div class="panel-body" id="zoneBars"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">% Utilization Distribution</div>
+      <div class="panel-desc">Share of trips by truck space utilization range</div>
+      <div class="util-legend">
+        <span><i class="dot" style="background:#FF0000"></i>&lt;50%</span>
+        <span><i class="dot" style="background:#FFC000"></i>50–99%</span>
+        <span><i class="dot" style="background:#2E75B6"></i>100%+</span>
+      </div>
+      <div class="panel-body" id="utilBars"></div>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--slate);">
+        Formula: % Utilization = boxes carried ÷ 125 (boxes for a fully-loaded truck)<br>
+        Note: records without a box quantity (Q'ty Box/Order) are counted as 100% Utilization
+      </div>
+    </div>
+  </div>
+
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-title">By Project</div>
+      <div class="panel-desc">Number of trips per project</div>
+      <div class="panel-body" id="projectBars"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">By Sub-contractor</div>
+      <div class="panel-desc">Number of trips per subcontractor</div>
+      <div class="panel-body" id="subcontractorBars"></div>
+    </div>
+  </div>
+
+  <div class="panels panels-1">
+    <div class="panel">
+      <div class="panel-title">Transport Cost by Project</div>
+      <div class="panel-desc">Total Transpost Cost (฿) per project for the selected period</div>
+      <div class="panel-body" id="costByProjectBars"></div>
+    </div>
+  </div>
+
   <div class="table-panel">
     <div class="panel-title" style="margin-bottom:14px;">Route Detail</div>
     <div id="tableWrap"></div>
   </div>
-
   </div>
 
   <div id="pageCapacity" style="display:none;">
