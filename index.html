@@ -1734,6 +1734,8 @@ function normalizeHeader(raw){
   if(exact) return exact;
   // Oct 2026 tab header is "Case (เหตุการณ์ผิดพลาดที่เกิดขึ้นในการจัดส่ง)"
   if(/^case\b/.test(lower)) return 'Case';
+  // Plate column: tolerate suffixes/variants such as "Car registration (ทะเบียนรถ)", "Car Registration No.", "License plate", "ทะเบียน"
+  if(/^car\s*reg/.test(lower) || /registration|licen[cs]e\s*plate|^plate\b|ทะเบียน/.test(lower)) return 'Car registration';
   if(HEADER_ALIASES[lower]) return HEADER_ALIASES[lower];
   return trimmed;
 }
@@ -3403,13 +3405,24 @@ const tsState = { mode:'day', scale:'abs', month:null, monthManual:false, sel:nu
 // same date (in sheet order) is that vehicle's trip N for the day. Computed
 // over ALL data so a plate that runs for several projects is counted once.
 let tsSeqMap = new Map();
+let tsSeqInfo = { withPlate:0, withDriver:0, total:0 };
 function tsBuildSeq(){
   tsSeqMap = new Map();
+  tsSeqInfo = { withPlate:0, withDriver:0, total:0 };
   const counter = {};
+  const norm = v => String(v || '').replace(/[\s\-\u200b\u200c\u200d\ufeff]/g,'').toLowerCase();
   DATA.forEach(r=>{
-    const plate = String(r.plate || '').replace(/[\s\-​]/g,'').toLowerCase();
-    if(!plate || !r.date){ tsSeqMap.set(r, 1); return; }
-    const k = r.date + '|' + plate;
+    tsSeqInfo.total++;
+    let id = norm(r.plate);
+    if(id) tsSeqInfo.withPlate++;
+    else {
+      // No plate on this row (column missing/renamed in the sheet): fall back to the driver so
+      // repeat runs on the same day are still counted instead of every row becoming Trip 1.
+      id = norm(r.driver);
+      if(id){ id = 'drv:' + id; tsSeqInfo.withDriver++; }
+    }
+    if(!id || !r.date){ tsSeqMap.set(r, 1); return; }
+    const k = r.date + '|' + id;
     counter[k] = (counter[k] || 0) + 1;
     tsSeqMap.set(r, counter[k]);
   });
@@ -3499,6 +3512,14 @@ function renderTripSequence(){
   });
   const keys = Object.keys(groups).sort();
   document.getElementById('tsDesc').textContent = `Total runs and % by trip number per ${unit}` + (byDay ? ` — ${fmtMonth(tsState.month)}` : ' — all months') + rangeTxt + ' · trip N = Nth run of the same plate that day · click a bar to see that ' + unit + "'s detail";
+  (function(){
+    const miss = tsSeqInfo.total - tsSeqInfo.withPlate;
+    if(miss > 0 && miss / Math.max(1, tsSeqInfo.total) > 0.02){
+      const el = document.getElementById('tsDesc');
+      const lost = miss - tsSeqInfo.withDriver;
+      el.textContent += ` · ⚠ ${miss.toLocaleString()} rows have no plate (${tsSeqInfo.withDriver.toLocaleString()} matched by driver instead${lost>0 ? `, ${lost.toLocaleString()} counted as Trip 1` : ''}) — check the "Car registration" column in the sheet`;
+    }
+  })();
   if(!keys.length){ chartEl.innerHTML='<div style="color:var(--slate-light);font-size:12px;">No data</div>'; tableEl.innerHTML=''; return; }
   // Default to the latest day/month that has data
   // Follow the latest day/week/month with data unless the user picked another one
