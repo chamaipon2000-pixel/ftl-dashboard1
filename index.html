@@ -3235,7 +3235,7 @@ function renderMonthComparison(){
     return Math.max(0, Math.min(to, dim) - from + 1);
   };
 
-  // Default selection: the 3 projects whose trip counts differ the most between months
+  // Default selection: the 5 projects whose trip counts differ the most between months
   // (largest max–min spread over the chosen day range). Months with incomplete data in
   // the range are ignored so a half-finished month doesn't distort the ranking.
   const pickDefault = () => {
@@ -3254,7 +3254,7 @@ function renderMonthComparison(){
     return allProjects
       .map(p=>{ const v = use.map(m=>trips[p][m]); return { p, spread: Math.max(...v)-Math.min(...v), total: v.reduce((a,b)=>a+b,0) }; })
       .sort((x,y)=> y.spread - x.spread || y.total - x.total)
-      .slice(0, 3).map(x=>x.p);
+      .slice(0, 5).map(x=>x.p);
   };
 
   let selected;
@@ -3268,7 +3268,7 @@ function renderMonthComparison(){
   const menu = document.getElementById('momProjectMenu');
   const keepScroll = menu.scrollTop;
   menu.innerHTML =
-    '<div class="mom-multi-actions"><button type="button" data-act="auto">Default (top 3)</button><button type="button" data-act="all">All Projects</button><button type="button" data-act="none">Clear</button></div>' +
+    '<div class="mom-multi-actions"><button type="button" data-act="auto">Default (top 5)</button><button type="button" data-act="all">All Projects</button><button type="button" data-act="none">Clear</button></div>' +
     allProjects.map(p=>`<label class="mom-multi-item"><input type="checkbox" data-project="${wowEsc(p)}" ${selected.includes(p)?'checked':''}><span>${wowEsc(p)}</span><button type="button" class="mom-only" data-only="${wowEsc(p)}" title="Show this project only">Only</button></label>`).join('');
   menu.scrollTop = keepScroll;
   document.querySelector('#momProjectBtn span').textContent =
@@ -3398,7 +3398,7 @@ const TS_BUCKETS = [
   { key:'2',  label:'Trip 2',  color:'#FF6A13', txt:'#fff' },
   { key:'3',  label:'Trip 3',  color:'#FFC000', txt:'#002060' }
 ];
-const tsState = { mode:'day', scale:'abs', month:null, monthManual:false, sel:null, selManual:false, ready:false, dayFrom:1, dayTo:31 };
+const tsState = { showAllProj:false, mode:'day', scale:'abs', month:null, monthManual:false, sel:null, selManual:false, ready:false, dayFrom:1, dayTo:31 };
 
 // The sheet's Trip column is 1 on every row (each row = one run), so the
 // trip number is derived instead: the Nth time the same plate runs on the
@@ -3440,7 +3440,7 @@ function tsSetup(){
   tsState.ready = true;
   document.getElementById('tsModeToggle').addEventListener('click', e=>{
     const b = e.target.closest('button[data-mode]'); if(!b) return;
-    tsState.mode = b.dataset.mode; tsState.sel = null; tsState.selManual = false; renderTripSequence();
+    tsState.mode = b.dataset.mode; tsState.showAllProj = false; tsState.sel = null; tsState.selManual = false; renderTripSequence();
   });
   document.getElementById('tsScaleToggle').addEventListener('click', e=>{
     const b = e.target.closest('button[data-scale]'); if(!b) return;
@@ -3465,15 +3465,16 @@ function tsSetup(){
   });
   document.getElementById('tsChart').addEventListener('click', e=>{
     const g = e.target.closest('[data-key]'); if(!g) return;
-    tsState.sel = g.dataset.key; tsState.selManual = true; renderTripSequence();
+    tsState.sel = g.dataset.key; tsState.selManual = true; tsState.showAllProj = false; renderTripSequence();
   });
   document.getElementById('tsTable').addEventListener('change', e=>{
     if(e.target.id !== 'tsSelKey') return;
-    tsState.sel = e.target.value; tsState.selManual = true; renderTripSequence();
+    tsState.sel = e.target.value; tsState.selManual = true; tsState.showAllProj = false; renderTripSequence();
   });
   document.getElementById('tsTable').addEventListener('click', e=>{
+    if(e.target.closest('#tsProjToggle')){ tsState.showAllProj = !tsState.showAllProj; renderTripSequence(); return; }
     if(!e.target.closest('#tsLatestBtn')) return;
-    tsState.sel = null; tsState.selManual = false; renderTripSequence();
+    tsState.sel = null; tsState.selManual = false; tsState.showAllProj = false; renderTripSequence();
   });
 }
 function renderTripSequence(){
@@ -3593,10 +3594,25 @@ function renderTripSequence(){
     byProj[pj][tsBucket(r)] += 1;
   });
   const projList = Object.entries(byProj).sort((x,y)=> (sum(y[1]) - sum(x[1])) || x[0].localeCompare(y[0]));
-  const body = projList.map(([pj,g])=>{
+  // All views (Daily / Weekly / Monthly): list only the top 5 projects (by total runs) first; the rest are rolled into one
+  // "Others" row so the rows still add up to the total. A button toggles the full list.
+  const TOP_N = 5;
+  const topOnly = !tsState.showAllProj && projList.length > TOP_N;
+  const shownList = topOnly ? projList.slice(0, TOP_N) : projList;
+  const restList = topOnly ? projList.slice(TOP_N) : [];
+  const body = shownList.map(([pj,g])=>{
     const t = sum(g);
     return `<tr><td>${wowEsc(pj)}</td>${TS_BUCKETS.map(b=>`<td>${g[b.key].toLocaleString()} <span style="color:var(--slate-light)">(${pc(g[b.key],t)})</span></td>`).join('')}<td>${t.toLocaleString()}</td></tr>`;
   }).join('');
+  let othersRow = '';
+  if(restList.length){
+    const og = { '1':0,'2':0,'3':0 };
+    restList.forEach(([pj,g])=>{ TS_BUCKETS.forEach(b=>{ og[b.key] += g[b.key]; }); });
+    const ot = sum(og);
+    othersRow = `<tr style="color:var(--slate);"><td>Others (${restList.length} projects)</td>${TS_BUCKETS.map(b=>`<td>${og[b.key].toLocaleString()} <span style="color:var(--slate-light)">(${pc(og[b.key],ot)})</span></td>`).join('')}<td>${ot.toLocaleString()}</td></tr>`;
+  }
+  const projToggle = (projList.length > TOP_N)
+    ? `<button id="tsProjToggle" class="trend-month-select" style="cursor:pointer;font-weight:600;color:#1D4ED8;margin-left:10px;">${tsState.showAllProj ? 'Show top 5' : `Show all ${projList.length} projects`}</button>` : '';
   const totRow = `<tr class="mom-total"><td>Total</td>${TS_BUCKETS.map(b=>`<td>${selTot[b.key].toLocaleString()} (${pc(selTot[b.key],selN)})</td>`).join('')}<td>${selN.toLocaleString()}</td></tr>`;
   const selOpts = keys.slice().reverse().map(k=>`<option value="${k}" ${k===selKey?'selected':''}>${keyLabel(k)}</option>`).join('');
 
@@ -3608,8 +3624,8 @@ function renderTripSequence(){
       ${selKey === keys[keys.length-1] ? '' : '<button id="tsLatestBtn" class="trend-month-select" style="cursor:pointer;font-weight:600;color:#1D4ED8;">Go to latest</button>'}
     </div>
     <div class="wc-cards">${cards}</div>
-    <div class="wc-section">By project</div>
-    <table class="mom-table" style="margin-top:6px;"><thead><tr><th>Project</th>${TS_BUCKETS.map(b=>`<th>${b.label}</th>`).join('')}<th>Total runs</th></tr></thead><tbody>${body}${totRow}</tbody></table>`;
+    <div class="wc-section">By project${(projList.length > TOP_N) ? (tsState.showAllProj ? ' · all projects' : ' · Top 5') : ''}${projToggle}</div>
+    <table class="mom-table" style="margin-top:6px;"><thead><tr><th>Project</th>${TS_BUCKETS.map(b=>`<th>${b.label}</th>`).join('')}<th>Total runs</th></tr></thead><tbody>${body}${othersRow}${totRow}</tbody></table>`;
 }
 
 function render(){
