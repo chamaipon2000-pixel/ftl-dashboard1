@@ -289,6 +289,15 @@
     border-radius:20px;
   }
 
+  /* ===== Week-compare filter chips ===== */
+  .wc-chips{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; font-size:12px; color:var(--slate-light); }
+  .wc-chips-label{ margin-right:2px; }
+  .wc-chip{ border:1px solid var(--line); background:#fff; color:var(--navy-deep); border-radius:999px; padding:4px 11px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
+  .wc-chip b{ background:#EEF4FF; border-radius:999px; padding:0 7px; margin-left:3px; }
+  .wc-chip:hover{ border-color:var(--navy-deep); }
+  .wc-chip.on{ background:var(--navy-deep); color:#fff; border-color:var(--navy-deep); }
+  .wc-chip.on b{ background:rgba(255,255,255,.2); }
+
   /* ===== Per-panel period selector ===== */
   .pp-ctl{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:4px 0 12px; }
   .pp-ctl select{ font-size:12px; padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:#EEF4FF; color:var(--ink); font-family:inherit; }
@@ -2844,7 +2853,7 @@ const WC_METRICS = {
   trip: { label: 'Trips', unit: 'trips', val: r => r.trip || 0 },
   box:  { label: 'Boxes', unit: 'boxes', val: r => r.box || 0 }
 };
-const wcState = { a: null, b: null, manual: false, metric: 'trip', selected: null, allKeys: [], ready: false, dow: null, dayAll: false, hmOpen: false, showSmall: false, smallKey: '' };
+const wcState = { a: null, b: null, manual: false, metric: 'trip', selected: null, allKeys: [], ready: false, dow: null, dayAll: false, hmOpen: false, showSmall: false, showNew: false, showNone: false, showZero: false, smallKey: '' };
 // Default view of the project table: only projects that moved by at least this much (5 trips / 100 boxes)
 const WC_MIN_CHANGE = { trip: 5, box: 100 };
 const WC_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -3111,10 +3120,32 @@ function renderWeekCompare(){
   // Smaller changes and Δ = 0 are hidden, and a button reveals the full list.
   const minChange = WC_MIN_CHANGE[wcState.metric] || 5;
   const smallKey = wkA + '|' + wkB + '|' + wcState.metric;
-  if(wcState.smallKey !== smallKey){ wcState.smallKey = smallKey; wcState.showSmall = false; }
-  const bigOnes = sorted.filter(o=>Math.abs(o.diff) >= minChange);
-  const shown = wcState.showSmall ? sorted : bigOnes;
-  const hiddenCount = sorted.length - bigOnes.length;
+  if(wcState.smallKey !== smallKey){
+    wcState.smallKey = smallKey;
+    wcState.showSmall = wcState.showNew = wcState.showNone = wcState.showZero = false;
+  }
+  // Every project falls into exactly one bucket. "big" rows are always listed; the others are
+  // hidden until their chip is switched on under the table.
+  const cat = o => {
+    if(Math.abs(o.diff) >= minChange) return 'big';
+    if(!o.a && o.b) return 'new';
+    if(o.a && !o.b) return 'none';
+    if(o.diff === 0) return 'zero';
+    return 'small';
+  };
+  const buckets = { big:[], new:[], none:[], small:[], zero:[] };
+  sorted.forEach(o=>buckets[cat(o)].push(o));
+  const on = { big:true, new:wcState.showNew, none:wcState.showNone, small:wcState.showSmall, zero:wcState.showZero };
+  const shown = sorted.filter(o=>on[cat(o)]);
+  const hiddenCount = sorted.length - shown.length;
+  const chip = (k, label, flag) => buckets[k].length
+    ? `<button type="button" class="wc-chip${flag?' on':''}" data-wc-chip="${k}">${flag?'✓ ':'+ '}${label} <b>${buckets[k].length}</b></button>` : '';
+  const chipsHtml = [
+    chip('new',  'NEW projects',   wcState.showNew),
+    chip('none', 'NONE (stopped)', wcState.showNone),
+    chip('small',`Small changes (<${minChange})`, wcState.showSmall),
+    chip('zero', 'No change',      wcState.showZero)
+  ].join('');
   const maxAbs = Math.max(1, ...sorted.map(o=>Math.abs(o.diff)));
   const rowHtml = o=>{
     const cls = o.diff > 0 ? 'wc-pos' : o.diff < 0 ? 'wc-neg' : 'wc-zero';
@@ -3140,7 +3171,7 @@ function renderWeekCompare(){
     ${insight ? `<div style="font-size:13px;color:var(--slate);margin-bottom:8px;">${insight}</div>` : ''}
     <table class="wc-table"><thead><tr><th>Project</th><th>${wkA}</th><th>${wkB}</th><th style="text-align:center">Change (◀ lower · higher ▶)</th><th>Δ ${M.unit}</th><th>Δ %</th></tr></thead>
     <tbody>${shown.length ? shown.map(rowHtml).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:14px 0;">No project changed by ${minChange}+ ${M.unit} between these two weeks</td></tr>`}${tot}</tbody></table>
-    ${hiddenCount ? `<div style="display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:var(--slate-light);"><span>${wcState.showSmall ? `Showing all ${sorted.length} projects` : `Showing projects that changed by ${minChange}+ ${M.unit} · ${hiddenCount} smaller or unchanged hidden`}</span><button type="button" id="wcSmallToggle" class="wc-more">${wcState.showSmall ? `Show only ${minChange}+ ${M.unit}` : `Show all ${sorted.length} projects`}</button></div>` : ''}
+    ${chipsHtml ? `<div class="wc-chips"><span class="wc-chips-label">Showing changes of ${minChange}+ ${M.unit}${hiddenCount ? ` · ${hiddenCount} hidden` : ''} · also show:</span>${chipsHtml}<button type="button" class="wc-chip" data-wc-chip="all">${hiddenCount ? 'Show all' : 'Reset'}</button></div>` : ''}
     ${partialNote.length ? `<div class="mom-note">⚠ ${partialNote.join(' and ')} ${partialNote.length > 1 ? 'are' : 'is'} still in progress — comparisons with a full week will look lower.</div>` : ''}`;
 }
 
@@ -3783,7 +3814,18 @@ function ppSync(){
 }
 
 document.addEventListener('click', e=>{
-  if(e.target.closest && e.target.closest('#wcSmallToggle')){ wcState.showSmall = !wcState.showSmall; renderWeekCompare(); }
+  const chipEl = e.target.closest && e.target.closest('[data-wc-chip]');
+  if(chipEl){
+    const k = chipEl.dataset.wcChip;
+    if(k === 'all'){
+      const anyHidden = !(wcState.showNew && wcState.showNone && wcState.showSmall && wcState.showZero);
+      wcState.showNew = wcState.showNone = wcState.showSmall = wcState.showZero = anyHidden;
+    } else {
+      const f = { new:'showNew', none:'showNone', small:'showSmall', zero:'showZero' }[k];
+      if(f) wcState[f] = !wcState[f];
+    }
+    renderWeekCompare();
+  }
 });
 document.addEventListener('change', e=>{
   const el = e.target.closest && e.target.closest('.pp-ctl'); if(!el) return;
