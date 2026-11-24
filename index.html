@@ -289,6 +289,17 @@
     border-radius:20px;
   }
 
+  /* ===== Per-panel period selector ===== */
+  .pp-ctl{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:4px 0 12px; }
+  .pp-ctl select{ font-size:12px; padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:#EEF4FF; color:var(--ink); font-family:inherit; }
+  .pp-ctl .pp-mode{ font-weight:600; color:var(--navy-deep); }
+  .pp-ctl .pp-mode.own{ background:var(--navy-deep); color:#fff; border-color:var(--navy-deep); }
+  .pp-ctl .pp-step{ border:1px solid var(--line); background:#fff; color:var(--navy-deep); border-radius:8px; width:26px; height:26px; line-height:1; font-size:15px; cursor:pointer; padding:0; }
+  .pp-ctl .pp-step:hover:not(:disabled){ background:var(--navy-deep); color:#fff; }
+  .pp-ctl .pp-step:disabled{ opacity:.35; cursor:default; }
+  .pp-ctl .pp-hint{ font-size:11.5px; color:var(--slate-light); }
+  body.present .pp-ctl .pp-step{ display:none; }
+
   /* ===== Presentation mode ===== */
   body.present .data-source-bar,
   body.present .table-panel,
@@ -3094,7 +3105,9 @@ function renderWeekCompare(){
   // Same order as the old Week-over-Week table: biggest increases first, then no change,
   // then the decreases (largest drop last) — gains and losses are kept apart, not mixed.
   const sorted = list.slice().sort((x,y)=> (y.diff - x.diff) || (y.b - x.b));
-  const shown = sorted;
+  // Projects with no change (Δ = 0) are hidden — only projects that went up or down are listed.
+  const shown = sorted.filter(o=>o.diff !== 0);
+  const hiddenZero = sorted.length - shown.length;
   const maxAbs = Math.max(1, ...sorted.map(o=>Math.abs(o.diff)));
   const rowHtml = o=>{
     const cls = o.diff > 0 ? 'wc-pos' : o.diff < 0 ? 'wc-neg' : 'wc-zero';
@@ -3119,7 +3132,8 @@ function renderWeekCompare(){
   tblEl.innerHTML = `<div class="wc-section">By project — what changed (${wkB} vs ${wkA})</div>
     ${insight ? `<div style="font-size:13px;color:var(--slate);margin-bottom:8px;">${insight}</div>` : ''}
     <table class="wc-table"><thead><tr><th>Project</th><th>${wkA}</th><th>${wkB}</th><th style="text-align:center">Change (◀ lower · higher ▶)</th><th>Δ ${M.unit}</th><th>Δ %</th></tr></thead>
-    <tbody>${shown.map(rowHtml).join('')}${tot}</tbody></table>
+    <tbody>${shown.length ? shown.map(rowHtml).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:14px 0;">No project changed between these two weeks</td></tr>`}${tot}</tbody></table>
+    ${hiddenZero ? `<div style="font-size:12px;color:var(--slate-light);margin-top:8px;">${hiddenZero} project${hiddenZero>1?'s':''} with no change (Δ = 0) hidden</div>` : ''}
     ${partialNote.length ? `<div class="mom-note">⚠ ${partialNote.join(' and ')} ${partialNote.length > 1 ? 'are' : 'is'} still in progress — comparisons with a full week will look lower.</div>` : ''}`;
 }
 
@@ -3649,18 +3663,19 @@ function render(){
     clearFiltersBtn.style.display = 'none';
   }
 
+  ppSync();
   renderKpis(computeKpis(rows));
   renderTripSequence();
-  renderProjectBars(rows);
-  renderCostByProjectBars(rows);
+  renderProjectBars(rowsForPanel('project'));
+  renderCostByProjectBars(rowsForPanel('cost'));
   renderProjectWeeklyComparison();
   renderMonthComparison();
   renderWeekCompare();
-  renderSubcontractorBars(rows);
-  renderUtilBars(rows);
-  renderTypeBars(rows);
-  renderTemperatureBars(rows);
-  renderZoneBars(rows);
+  renderSubcontractorBars(rowsForPanel('subc'));
+  renderUtilBars(rowsForPanel('util'));
+  renderTypeBars(rowsForPanel('type'));
+  renderTemperatureBars(rowsForPanel('temp'));
+  renderZoneBars(rowsForPanel('zone'));
   renderCapacityPanel();
   renderTable(rows);
 }
@@ -3679,7 +3694,104 @@ pageTabs.addEventListener('click', (e)=>{
   pageCapacity.style.display = page === 'capacity' ? '' : 'none';
 });
 
+// ---------- Per-panel period selectors ----------
+// Each of these panels can follow the main filter bar at the top ("Follow top filter", the default)
+// or use its own Day / Week / Month / All selector, so periods can be compared right where the
+// chart is without scrolling back up. Project / Sub-contractor filters still apply to every panel.
+const PP_PANELS = [
+  { key:'type',    body:'typeBars' },
+  { key:'temp',    body:'temperatureBars' },
+  { key:'zone',    body:'zoneBars' },
+  { key:'util',    body:'utilBars' },
+  { key:'project', body:'projectBars' },
+  { key:'subc',    body:'subcontractorBars' },
+  { key:'cost',    body:'costByProjectBars' }
+];
+const ppState = {};
+PP_PANELS.forEach(p=>{ ppState[p.key] = { mode:'global', val:null }; });
+const ppWeekKey = d => { const w = excelWeekNum(d); return w.year + '-' + w.week; };
+
+function ppOptions(mode){
+  if(mode === 'day'){
+    const dates = [...new Set(DATA.map(r=>r.date).filter(Boolean))].sort().reverse();
+    return dates.map(d=>({ v:d, t:fmtDate(d) }));
+  }
+  if(mode === 'week'){
+    const seen = new Map();
+    DATA.forEach(r=>{ if(r.date){ const w = excelWeekNum(r.date); const k = w.year + '-' + w.week; if(!seen.has(k)) seen.set(k, w); } });
+    return [...seen.entries()].sort((a,b)=> (b[1].year - a[1].year) || (b[1].week - a[1].week))
+      .map(([k,w])=>({ v:k, t:`Week ${w.week} · ${fmtExcelWeekLabel(w.year, w.week)}` }));
+  }
+  if(mode === 'month'){
+    const months = [...new Set(DATA.map(r=>r.month).filter(Boolean))].sort().reverse();
+    return months.map(m=>({ v:m, t:fmtMonth(m) }));
+  }
+  return [];
+}
+
+function rowsForPanel(key){
+  const c = ppState[key];
+  if(!c || c.mode === 'global') return getFiltered();
+  let rows = getEntityFiltered();
+  if(c.mode === 'day')   rows = rows.filter(r=>r.date === c.val);
+  if(c.mode === 'week')  rows = rows.filter(r=>r.date && ppWeekKey(r.date) === c.val);
+  if(c.mode === 'month') rows = rows.filter(r=>r.month === c.val);
+  return rows;
+}
+
+function ppInit(){
+  PP_PANELS.forEach(p=>{
+    const body = document.getElementById(p.body);
+    if(!body || body.previousElementSibling?.classList.contains('pp-ctl')) return;
+    const el = document.createElement('div');
+    el.className = 'pp-ctl'; el.dataset.pp = p.key;
+    el.innerHTML = `<select class="pp-mode" title="Period for this chart">
+        <option value="global">Follow top filter</option><option value="day">Day</option>
+        <option value="week">Week</option><option value="month">Month</option><option value="all">All data</option></select>
+      <button type="button" class="pp-step" data-step="1" title="Older">‹</button>
+      <select class="pp-val"></select>
+      <button type="button" class="pp-step" data-step="-1" title="Newer">›</button>`;
+    body.parentNode.insertBefore(el, body);
+  });
+}
+
+function ppSync(){
+  document.querySelectorAll('.pp-ctl').forEach(el=>{
+    const c = ppState[el.dataset.pp];
+    const modeSel = el.querySelector('.pp-mode'), valSel = el.querySelector('.pp-val');
+    const showVal = ['day','week','month'].includes(c.mode);
+    modeSel.value = c.mode;
+    modeSel.classList.toggle('own', c.mode !== 'global');
+    valSel.style.display = showVal ? '' : 'none';
+    el.querySelectorAll('.pp-step').forEach(b=>{ b.style.display = showVal ? '' : 'none'; });
+    if(!showVal){ return; }
+    const opts = ppOptions(c.mode);
+    if(!opts.some(o=>o.v === c.val)) c.val = opts.length ? opts[0].v : null;   // default = latest
+    valSel.innerHTML = opts.map(o=>`<option value="${o.v}">${o.t}</option>`).join('');
+    valSel.value = c.val;
+    const i = opts.findIndex(o=>o.v === c.val);
+    el.querySelector('[data-step="1"]').disabled  = i >= opts.length - 1;   // older
+    el.querySelector('[data-step="-1"]').disabled = i <= 0;                  // newer
+  });
+}
+
+document.addEventListener('change', e=>{
+  const el = e.target.closest && e.target.closest('.pp-ctl'); if(!el) return;
+  const c = ppState[el.dataset.pp];
+  if(e.target.classList.contains('pp-mode')){ c.mode = e.target.value; c.val = null; }
+  else if(e.target.classList.contains('pp-val')){ c.val = e.target.value; }
+  render();
+});
+document.addEventListener('click', e=>{
+  const b = e.target.closest && e.target.closest('.pp-step'); if(!b || b.disabled) return;
+  const el = b.closest('.pp-ctl'); const c = ppState[el.dataset.pp];
+  const opts = ppOptions(c.mode); const i = opts.findIndex(o=>o.v === c.val);
+  const j = i + parseInt(b.dataset.step, 10);
+  if(j >= 0 && j < opts.length){ c.val = opts[j].v; render(); }
+});
+
 // ---------- Init ----------
+ppInit();
 populatePeriodSelect();
 populateEntitySelects();
 render();
