@@ -2844,7 +2844,9 @@ const WC_METRICS = {
   trip: { label: 'Trips', unit: 'trips', val: r => r.trip || 0 },
   box:  { label: 'Boxes', unit: 'boxes', val: r => r.box || 0 }
 };
-const wcState = { a: null, b: null, manual: false, metric: 'trip', selected: null, allKeys: [], ready: false, dow: null, dayAll: false, hmOpen: false };
+const wcState = { a: null, b: null, manual: false, metric: 'trip', selected: null, allKeys: [], ready: false, dow: null, dayAll: false, hmOpen: false, showSmall: false, smallKey: '' };
+// Default view of the project table: only projects that moved by at least this much (5 trips / 100 boxes)
+const WC_MIN_CHANGE = { trip: 5, box: 100 };
 const WC_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 function wcSetup(){
@@ -3105,9 +3107,14 @@ function renderWeekCompare(){
   // Same order as the old Week-over-Week table: biggest increases first, then no change,
   // then the decreases (largest drop last) — gains and losses are kept apart, not mixed.
   const sorted = list.slice().sort((x,y)=> (y.diff - x.diff) || (y.b - x.b));
-  // Projects with no change (Δ = 0) are hidden — only projects that went up or down are listed.
-  const shown = sorted.filter(o=>o.diff !== 0);
-  const hiddenZero = sorted.length - shown.length;
+  // Default: list only projects whose change is large enough (>= 5 trips; 100 boxes in Boxes mode).
+  // Smaller changes and Δ = 0 are hidden, and a button reveals the full list.
+  const minChange = WC_MIN_CHANGE[wcState.metric] || 5;
+  const smallKey = wkA + '|' + wkB + '|' + wcState.metric;
+  if(wcState.smallKey !== smallKey){ wcState.smallKey = smallKey; wcState.showSmall = false; }
+  const bigOnes = sorted.filter(o=>Math.abs(o.diff) >= minChange);
+  const shown = wcState.showSmall ? sorted : bigOnes;
+  const hiddenCount = sorted.length - bigOnes.length;
   const maxAbs = Math.max(1, ...sorted.map(o=>Math.abs(o.diff)));
   const rowHtml = o=>{
     const cls = o.diff > 0 ? 'wc-pos' : o.diff < 0 ? 'wc-neg' : 'wc-zero';
@@ -3132,8 +3139,8 @@ function renderWeekCompare(){
   tblEl.innerHTML = `<div class="wc-section">By project — what changed (${wkB} vs ${wkA})</div>
     ${insight ? `<div style="font-size:13px;color:var(--slate);margin-bottom:8px;">${insight}</div>` : ''}
     <table class="wc-table"><thead><tr><th>Project</th><th>${wkA}</th><th>${wkB}</th><th style="text-align:center">Change (◀ lower · higher ▶)</th><th>Δ ${M.unit}</th><th>Δ %</th></tr></thead>
-    <tbody>${shown.length ? shown.map(rowHtml).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:14px 0;">No project changed between these two weeks</td></tr>`}${tot}</tbody></table>
-    ${hiddenZero ? `<div style="font-size:12px;color:var(--slate-light);margin-top:8px;">${hiddenZero} project${hiddenZero>1?'s':''} with no change (Δ = 0) hidden</div>` : ''}
+    <tbody>${shown.length ? shown.map(rowHtml).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--slate);padding:14px 0;">No project changed by ${minChange}+ ${M.unit} between these two weeks</td></tr>`}${tot}</tbody></table>
+    ${hiddenCount ? `<div style="display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:var(--slate-light);"><span>${wcState.showSmall ? `Showing all ${sorted.length} projects` : `Showing projects that changed by ${minChange}+ ${M.unit} · ${hiddenCount} smaller or unchanged hidden`}</span><button type="button" id="wcSmallToggle" class="wc-more">${wcState.showSmall ? `Show only ${minChange}+ ${M.unit}` : `Show all ${sorted.length} projects`}</button></div>` : ''}
     ${partialNote.length ? `<div class="mom-note">⚠ ${partialNote.join(' and ')} ${partialNote.length > 1 ? 'are' : 'is'} still in progress — comparisons with a full week will look lower.</div>` : ''}`;
 }
 
@@ -3775,6 +3782,9 @@ function ppSync(){
   });
 }
 
+document.addEventListener('click', e=>{
+  if(e.target.closest && e.target.closest('#wcSmallToggle')){ wcState.showSmall = !wcState.showSmall; renderWeekCompare(); }
+});
 document.addEventListener('change', e=>{
   const el = e.target.closest && e.target.closest('.pp-ctl'); if(!el) return;
   const c = ppState[el.dataset.pp];
